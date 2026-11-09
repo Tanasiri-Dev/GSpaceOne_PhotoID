@@ -64,6 +64,13 @@ pub fn run() {
             // 3. Mark GPU acceleration status in central shared state
             app_state.write().gpu_available = gpu_available;
 
+            // 4. Ensure window icon is explicitly set on the main window for Windows title bar & taskbar
+            if let Some(main_window) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = main_window.set_icon(icon.clone());
+                }
+            }
+
             info!(
                 "GSpaceOne PhotoID backend fully initialized (GPU compute acceleration: {})",
                 if gpu_available { "ENABLED" } else { "DISABLED (Parallel CPU fallback active)" }
