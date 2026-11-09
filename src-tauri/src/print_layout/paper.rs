@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Represents a standard physical paper format.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]

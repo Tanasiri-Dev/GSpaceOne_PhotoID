@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use base64::prelude::*;
-use log::{error, info};
+use log::info;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 

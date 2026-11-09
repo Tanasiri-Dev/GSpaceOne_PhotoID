@@ -54,9 +54,8 @@ impl GpuComputeEngine {
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::default(),
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
             },
+            None,
         )) {
             Ok(device_queue) => device_queue,
             Err(e) => {
@@ -214,9 +213,7 @@ impl GpuComputeEngine {
             let _ = sender.send(result);
         });
 
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| format!("GPU device poll failed: {e}"))?;
+        let _ = self.device.poll(wgpu::Maintain::wait());
 
         receiver
             .recv()
