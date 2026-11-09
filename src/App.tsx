@@ -5,6 +5,7 @@ import { PreviewCanvas } from './components/canvas/PreviewCanvas';
 import { FloatingSettings } from './components/settings/FloatingSettings';
 import { PrintPreview } from './components/print/PrintPreview';
 import { ImageInfoModal } from './components/info/ImageInfoModal';
+import { PrintDialogModal } from './components/print/PrintDialogModal';
 import { useFloatingWindow } from './hooks/useFloatingWindow';
 import appIcon from './assets/app-icon.png';
 
@@ -498,6 +499,9 @@ export const App: React.FC = () => {
 
       {/* Image Info & EXIF Modal */}
       <ImageInfoModal />
+
+      {/* Advanced Print Layout & Spooling Modal */}
+      <PrintDialogModal />
     </div>
   );
 };

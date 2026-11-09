@@ -62,6 +62,7 @@ export interface AppStore {
   // UI state
   settingsWindowOpen: boolean;
   showPrintPreview: boolean;
+  showPrintModal: boolean;
   showInfoModal: boolean;
   mainWorkspaceMode: 'editor' | 'sheet'; // Swap between single photo editor & full print sheet
 
@@ -69,6 +70,7 @@ export interface AppStore {
   loadImage: (path: string) => Promise<void>;
   fetchImageInfo: () => Promise<void>;
   setShowInfoModal: (show: boolean) => void;
+  setShowPrintModal: (show: boolean) => void;
   setShowBrandLogo: (show: boolean) => void;
   setWorkspaceMode: (mode: 'editor' | 'sheet') => void;
   toggleWorkspaceMode: () => void;
@@ -209,10 +211,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   // UI state
   settingsWindowOpen: false,
   showPrintPreview: true, // Default open so user immediately sees both single photo and sheet
+  showPrintModal: false,
   showInfoModal: false,
   mainWorkspaceMode: 'editor', // 'editor' for single photo, 'sheet' for full sheet view
 
   setShowBrandLogo: (show: boolean) => set({ showBrandLogo: show }),
+  setShowPrintModal: (show: boolean) => set({ showPrintModal: show }),
 
   // Actions
   loadImage: async (path: string) => {
@@ -500,18 +504,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
 
-    set({ isProcessing: true });
-    try {
-      await invoke('execute_print', {
-        idSize: state.selectedIdSize,
-        paperSize: state.selectedPaperSize,
-        showLogo: state.showBrandLogo,
-      });
-    } catch (err) {
-      console.error('execute_print invoke failed:', err);
-    } finally {
-      set({ isProcessing: false });
-    }
+    // Open interactive Print Dialog window with full layout, gamma, scale, margins, position & printer selection
+    set({ showPrintModal: true });
   },
 
   resetAll: () => {

@@ -18,6 +18,14 @@ pub struct SupportedSizesInfo {
     pub id_sizes: Vec<String>,
 }
 
+/// Information response for detected system printers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrinterListInfo {
+    pub default_printer: String,
+    pub printers: Vec<String>,
+}
+
 /// Result returned to frontend upon successfully loading an image.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -328,30 +336,211 @@ pub fn get_supported_sizes() -> Result<SupportedSizesInfo, String> {
     })
 }
 
-/// Dispatches image to native OS printing subsystem.
-fn dispatch_native_print(path: &std::path::Path) -> Result<(), String> {
-    let path_str = path.to_str().ok_or_else(|| "Invalid print file path".to_string())?;
-
+/// Query installed printers from the operating system.
+#[tauri::command]
+pub fn get_printers() -> Result<PrinterListInfo, String> {
     #[cfg(target_os = "windows")]
     {
-        // On Windows: trigger the standard Windows Print verb via PowerShell
-        let script = format!("Start-Process -FilePath '{}' -Verb Print", path_str.replace('\'', "''"));
-        let status = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
-            .status()
-            .map_err(|e| format!("Failed to spawn PowerShell print command: {e}"))?;
+        let ps_code = "Add-Type -AssemblyName System.Drawing; [PSCustomObject]@{ defaultPrinter = (New-Object System.Drawing.Printing.PrinterSettings).PrinterName; printers = @([System.Drawing.Printing.PrinterSettings]::InstalledPrinters) } | ConvertTo-Json";
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", ps_code])
+            .output()
+            .map_err(|e| format!("Failed to query Windows printers: {e}"))?;
 
-        if !status.success() {
-            // Fallback: launch default Windows photo viewer
-            let _ = std::process::Command::new("cmd")
-                .args(["/C", "start", "", path_str])
-                .status();
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if let Ok(info) = serde_json::from_str::<PrinterListInfo>(&text) {
+                return Ok(info);
+            }
         }
     }
 
     #[cfg(target_os = "macos")]
     {
-        // On macOS: send to lpr print spooler or launch Preview print dialog
+        if let Ok(output) = std::process::Command::new("lpstat").args(["-p", "-d"]).output() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let mut printers = Vec::new();
+            let mut default_printer = String::new();
+            for line in text.lines() {
+                if line.starts_with("printer ") {
+                    if let Some(p_name) = line.split_whitespace().nth(1) {
+                        printers.push(p_name.to_string());
+                    }
+                } else if line.starts_with("system default destination: ") {
+                    if let Some(d_name) = line.split(": ").nth(1) {
+                        default_printer = d_name.trim().to_string();
+                    }
+                }
+            }
+            if !printers.is_empty() {
+                if default_printer.is_empty() {
+                    default_printer = printers[0].clone();
+                }
+                return Ok(PrinterListInfo { default_printer, printers });
+            }
+        }
+    }
+
+    // Fallback default list
+    Ok(PrinterListInfo {
+        default_printer: "System Default Printer".to_string(),
+        printers: vec![
+            "System Default Printer".to_string(),
+            "Microsoft Print to PDF".to_string(),
+        ],
+    })
+}
+
+/// Direct print submission to a specific printer using native OS spooler.
+#[tauri::command]
+pub async fn print_sheet_direct(
+    pool: State<'_, Arc<WorkerPool>>,
+    printer_name: Option<String>,
+    copies: Option<u32>,
+    is_landscape: Option<bool>,
+    image_base64: String,
+) -> Result<String, String> {
+    let pool = pool.inner().clone();
+    pool.spawn_blocking(move || {
+        // Strip data:image/...;base64, prefix if present
+        let raw_base64 = if let Some(idx) = image_base64.find("base64,") {
+            &image_base64[idx + 7..]
+        } else {
+            &image_base64
+        };
+
+        let image_bytes = BASE64_STANDARD
+            .decode(raw_base64.trim())
+            .map_err(|e| format!("Invalid base64 image data: {e}"))?;
+
+        let temp_filename = format!("gspaceone_photoid_print_{}.png", uuid::Uuid::new_v4());
+        let temp_path = std::env::temp_dir().join(&temp_filename);
+        std::fs::write(&temp_path, image_bytes)
+            .map_err(|e| format!("Failed to write temporary print spool file: {e}"))?;
+
+        let target_printer = printer_name.unwrap_or_default();
+        let num_copies = copies.unwrap_or(1).max(1);
+        let landscape_bool = is_landscape.unwrap_or(false);
+
+        info!(
+            "Dispatching print job to '{}' (copies: {}, landscape: {})",
+            target_printer, num_copies, landscape_bool
+        );
+
+        #[cfg(target_os = "windows")]
+        {
+            let script = format!(
+                r#"
+Add-Type -AssemblyName System.Drawing
+$doc = New-Object System.Drawing.Printing.PrintDocument
+if ('{printer}' -ne '' -and '{printer}' -ne 'System Default Printer') {{
+    $doc.PrinterSettings.PrinterName = '{printer}'
+}}
+$doc.PrinterSettings.Copies = {copies}
+$doc.DefaultPageSettings.Landscape = ${landscape}
+$image = [System.Drawing.Image]::FromFile('{file_path}')
+$doc.add_PrintPage({{
+    param($s, $ev)
+    $ev.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $ev.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+    $ev.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $ev.Graphics.DrawImage($image, $ev.PageBounds)
+    $ev.HasMorePages = $false
+}})
+$doc.Print()
+$image.Dispose()
+$doc.Dispose()
+"#,
+                printer = target_printer.replace('\'', "''"),
+                copies = num_copies,
+                landscape = landscape_bool,
+                file_path = temp_path.display().to_string().replace('\'', "''"),
+            );
+
+            let output = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+                .output()
+                .map_err(|e| format!("Failed to execute Windows print spooler: {e}"))?;
+
+            let _ = std::fs::remove_file(&temp_path);
+
+            if !output.status.success() {
+                let err_msg = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Print spooler error: {err_msg}"));
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let mut cmd = std::process::Command::new("lpr");
+            if !target_printer.is_empty() && target_printer != "System Default Printer" {
+                cmd.arg("-P").arg(&target_printer);
+            }
+            cmd.arg(format!("-#{}", num_copies));
+            cmd.arg(temp_path.to_str().unwrap());
+            let status = cmd.status().map_err(|e| format!("Failed to execute lpr: {e}"))?;
+            let _ = std::fs::remove_file(&temp_path);
+            if !status.success() {
+                return Err("lpr command returned error status".to_string());
+            }
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let mut cmd = std::process::Command::new("lpr");
+            cmd.arg(temp_path.to_str().unwrap());
+            let _ = cmd.status();
+            let _ = std::fs::remove_file(&temp_path);
+        }
+
+        Ok(format!(
+            "Print job successfully queued for '{}' ({} {})",
+            if target_printer.is_empty() { "Default Printer" } else { &target_printer },
+            num_copies,
+            if num_copies == 1 { "copy" } else { "copies" }
+        ))
+    })
+}
+
+/// Dispatches image to native OS printing subsystem via .NET PrintDocument on Windows.
+fn dispatch_native_print(path: &std::path::Path) -> Result<(), String> {
+    let path_str = path.to_str().ok_or_else(|| "Invalid print file path".to_string())?;
+
+    #[cfg(target_os = "windows")]
+    {
+        // Direct spooling to default printer via System.Drawing.Printing.PrintDocument
+        let script = format!(
+            r#"
+Add-Type -AssemblyName System.Drawing
+$doc = New-Object System.Drawing.Printing.PrintDocument
+$image = [System.Drawing.Image]::FromFile('{file_path}')
+$doc.add_PrintPage({{
+    param($s, $ev)
+    $ev.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $ev.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+    $ev.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $ev.Graphics.DrawImage($image, $ev.PageBounds)
+    $ev.HasMorePages = $false
+}})
+$doc.Print()
+$image.Dispose()
+$doc.Dispose()
+"#,
+            file_path = path_str.replace('\'', "''"),
+        );
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &script])
+            .output()
+            .map_err(|e| format!("Failed to execute PowerShell print spooler: {e}"))?;
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            log::warn!("PowerShell print spooler warning: {err_msg}");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
         let status = std::process::Command::new("lpr")
             .arg(path_str)
             .status();
@@ -365,7 +554,6 @@ fn dispatch_native_print(path: &std::path::Path) -> Result<(), String> {
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        // Linux / Unix fallback
         let _ = std::process::Command::new("lpr")
             .arg(path_str)
             .status();
