@@ -21,7 +21,6 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
   const printLayoutInfo = useAppStore((state) => state.printLayoutInfo);
   const customPhotoCount = useAppStore((state) => state.customPhotoCount);
   const setCustomPhotoCount = useAppStore((state) => state.setCustomPhotoCount);
-  const isProcessing = useAppStore((state) => state.isProcessing);
 
   const setAdjustment = useAppStore((state) => state.setAdjustment);
   const resetAll = useAppStore((state) => state.resetAll);
@@ -110,7 +109,6 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
             defaultValue={0}
             unit="%"
             onChange={(val) => setAdjustment('brightness', val)}
-            disabled={isProcessing}
           />
 
           <AdjustmentSlider
@@ -122,7 +120,6 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
             defaultValue={0}
             unit="EV"
             onChange={(val) => setAdjustment('exposure', val)}
-            disabled={isProcessing}
           />
 
           <AdjustmentSlider
@@ -133,7 +130,6 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
             step={0.05}
             defaultValue={1.0}
             onChange={(val) => setAdjustment('gamma', val)}
-            disabled={isProcessing}
           />
         </section>
 

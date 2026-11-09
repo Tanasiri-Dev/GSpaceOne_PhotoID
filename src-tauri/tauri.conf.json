@@ -56,7 +56,7 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
-        "installerHooks": "nsis_hooks.nsh"
+        "template": "installer.nsi"
       }
     },
     "macOS": {

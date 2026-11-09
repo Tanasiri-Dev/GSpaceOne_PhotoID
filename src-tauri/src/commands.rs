@@ -174,6 +174,7 @@ pub async fn execute_print(
                 .clone();
             let snapshot = crate::state::app_state::AppState {
                 source_image: None,
+                preview_base: None,
                 adjustments: guard.adjustments,
                 crop: guard.crop,
                 gpu_available: false,
@@ -242,6 +243,7 @@ pub async fn save_high_quality_image(
                 .clone();
             let snapshot = crate::state::app_state::AppState {
                 source_image: None,
+                preview_base: None,
                 adjustments: guard.adjustments,
                 crop: guard.crop,
                 gpu_available: false,

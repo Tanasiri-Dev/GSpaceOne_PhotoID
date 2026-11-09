@@ -568,6 +568,37 @@ textarea {
   border-color: var(--accent-light);
 }
 
+.slider-input-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.slider-number-input {
+  width: 64px;
+  color: var(--text-primary);
+  font-family: monospace;
+  font-size: 12px;
+  text-align: right;
+  padding: 2px 6px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-xs);
+  outline: none;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.slider-number-input:focus {
+  border-color: var(--highlight);
+  background-color: var(--bg-elevated);
+}
+
+.slider-unit {
+  color: #94a3b8;
+  font-family: monospace;
+  font-size: 11px;
+}
+
 /* Custom Range Input */
 input[type="range"] {
   -webkit-appearance: none;

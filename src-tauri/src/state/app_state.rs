@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use image::DynamicImage;
+use image::{DynamicImage, RgbaImage};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
@@ -90,6 +90,7 @@ impl CropRegion {
 #[derive(Default)]
 pub struct AppState {
     pub source_image: Option<DynamicImage>,
+    pub preview_base: Option<RgbaImage>,
     pub adjustments: ImageAdjustments,
     pub crop: CropRegion,
     pub gpu_available: bool,
@@ -109,8 +110,15 @@ impl AppState {
         Arc::new(RwLock::new(Self::default()))
     }
 
-    /// Replace the current source image and reset crop.
+    /// Replace the current source image, pre-cache downscaled preview buffer for smooth adjustments, and reset crop.
     pub fn set_image(&mut self, image: DynamicImage) {
+        let max_size = 1280;
+        let preview = if image.width() > max_size || image.height() > max_size {
+            image.resize(max_size, max_size, image::imageops::FilterType::Triangle).to_rgba8()
+        } else {
+            image.to_rgba8()
+        };
+        self.preview_base = Some(preview);
         self.source_image = Some(image);
         self.crop.reset();
     }

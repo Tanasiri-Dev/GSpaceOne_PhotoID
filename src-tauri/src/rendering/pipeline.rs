@@ -1,5 +1,4 @@
-use std::io::Cursor;
-use image::{DynamicImage, GenericImageView, ImageFormat, RgbaImage};
+use image::{DynamicImage, GenericImageView, ImageEncoder, RgbaImage};
 use log::warn;
 use thiserror::Error;
 
@@ -42,27 +41,39 @@ impl<'a> RenderPipeline<'a> {
     /// Note: Keeps full image bounds for interactive workspace crop manipulation.
     /// Returns PNG-encoded bytes.
     pub fn render_preview(&self, max_size: u32) -> Result<Vec<u8>, RenderError> {
-        let full_img = self.state.source_image.as_ref().ok_or(RenderError::NoImageLoaded)?;
-
-        // 1. Downscale full image for preview performance
-        let scaled = if max_size > 0 && (full_img.width() > max_size || full_img.height() > max_size) {
-            full_img.resize(max_size, max_size, image::imageops::FilterType::Triangle)
+        // 1. Use pre-cached downscaled preview buffer if available to avoid expensive full-image resize
+        let mut rgba = if let Some(base) = &self.state.preview_base {
+            base.clone()
         } else {
-            full_img.clone()
+            let full_img = self.state.source_image.as_ref().ok_or(RenderError::NoImageLoaded)?;
+            let scaled = if max_size > 0 && (full_img.width() > max_size || full_img.height() > max_size) {
+                full_img.resize(max_size, max_size, image::imageops::FilterType::Triangle)
+            } else {
+                full_img.clone()
+            };
+            scaled.to_rgba8()
         };
 
         // 2. Apply color adjustments (GPU with automatic CPU fallback)
-        let mut rgba = scaled.to_rgba8();
         apply_pipeline_adjustments(
             &mut rgba,
             self.state,
             self.gpu,
         )?;
 
-        // 4. Encode to PNG
+        // 3. Fast PNG encoding
         let mut bytes = Vec::new();
-        let mut cursor = Cursor::new(&mut bytes);
-        DynamicImage::ImageRgba8(rgba).write_to(&mut cursor, ImageFormat::Png)?;
+        let encoder = image::codecs::png::PngEncoder::new_with_quality(
+            &mut bytes,
+            image::codecs::png::CompressionType::Fast,
+            image::codecs::png::FilterType::NoFilter,
+        );
+        encoder.write_image(
+            &rgba,
+            rgba.width(),
+            rgba.height(),
+            image::ExtendedColorType::Rgba8,
+        )?;
 
         Ok(bytes)
     }

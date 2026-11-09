@@ -185,6 +185,7 @@ export function calculatePrintLayout(
 
 // Module-level debounce timer for adjustments (50ms)
 let debounceAdjustmentTimer: ReturnType<typeof setTimeout> | null = null;
+let currentAdjustmentRequestId = 0;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // Image state
@@ -290,6 +291,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       clearTimeout(debounceAdjustmentTimer);
     }
 
+    currentAdjustmentRequestId += 1;
+    const reqId = currentAdjustmentRequestId;
+
     return new Promise<void>((resolve) => {
       debounceAdjustmentTimer = setTimeout(async () => {
         const state = get();
@@ -298,7 +302,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
           return;
         }
 
-        set({ isProcessing: true });
         try {
           // Normalize brightness to -1.0 to 1.0
           const normalizedBrightness = state.brightness / 100.0;
@@ -309,16 +312,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
             gamma: state.gamma,
           });
 
-          if (updatedPreview) {
+          // Discard if a newer adjustment request was fired in the meantime
+          if (reqId === currentAdjustmentRequestId && updatedPreview) {
             set({ previewData: updatedPreview });
           }
         } catch (err) {
           console.warn('apply_adjustments invoke error:', err);
         } finally {
-          set({ isProcessing: false });
           resolve();
         }
-      }, 50); // 50ms debounce
+      }, 16); // 16ms for buttery 60fps responsiveness
     });
   },
 
