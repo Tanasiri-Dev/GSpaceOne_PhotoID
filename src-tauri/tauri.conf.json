@@ -50,9 +50,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "icons/icon.ico": "icon.ico"
+    },
     "windows": {
       "nsis": {
-        "installerIcon": "icons/icon.ico"
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "nsis_hooks.nsh"
       }
     },
     "macOS": {
