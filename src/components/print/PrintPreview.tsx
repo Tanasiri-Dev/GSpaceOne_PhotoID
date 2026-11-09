@@ -1,9 +1,11 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../../state/store';
+import brandLogoUrl from '../../assets/GSpaceOne_PhotoID_Logo.png';
 
 export const PrintPreview: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const logoImageRef = useRef<HTMLImageElement | null>(null);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
@@ -12,6 +14,8 @@ export const PrintPreview: React.FC = () => {
   const selectedIdSize = useAppStore((state) => state.selectedIdSize);
   const selectedPaperSize = useAppStore((state) => state.selectedPaperSize);
   const printLayoutInfo = useAppStore((state) => state.printLayoutInfo);
+  const showBrandLogo = useAppStore((state) => state.showBrandLogo);
+  const setShowBrandLogo = useAppStore((state) => state.setShowBrandLogo);
   const isProcessing = useAppStore((state) => state.isProcessing);
   const executePrint = useAppStore((state) => state.executePrint);
   const computeLayout = useAppStore((state) => state.computeLayout);
@@ -19,6 +23,15 @@ export const PrintPreview: React.FC = () => {
   const mainWorkspaceMode = useAppStore((state) => state.mainWorkspaceMode);
   const toggleWorkspaceMode = useAppStore((state) => state.toggleWorkspaceMode);
   const setWorkspaceMode = useAppStore((state) => state.setWorkspaceMode);
+
+  // Preload official logo PNG
+  useEffect(() => {
+    const img = new Image();
+    img.src = brandLogoUrl;
+    img.onload = () => {
+      logoImageRef.current = img;
+    };
+  }, []);
 
   const cropActive = useAppStore((state) => state.cropActive);
   const cropX = useAppStore((state) => state.cropX);
@@ -196,60 +209,30 @@ export const PrintPreview: React.FC = () => {
         }
       }
 
-      // Draw GSpaceOne PhotoID Brand Emblem in safe margin space (never overlapping photos)
-      const logoW = 84;
-      const logoH = 20;
+      // Draw official GSpaceOne PhotoID Brand Logo in safe margin space (never overlapping photos) if enabled
+      if (showBrandLogo && logoImageRef.current) {
+        const logoImg = logoImageRef.current;
+        const aspect = (logoImg.naturalWidth || 1084) / (logoImg.naturalHeight || 291);
+        const gridRight = startX + columns * cellW + (columns - 1) * spacing;
+        const gridBottom = startY + rows * cellH + (rows - 1) * spacing;
 
-      const gridRight = startX + columns * cellW + (columns - 1) * spacing;
-      const gridBottom = startY + rows * cellH + (rows - 1) * spacing;
+        const bottomAvailable = canvasH - gridBottom;
+        const rightAvailable = canvasW - gridRight;
 
-      let logoX = canvasW - logoW - 6;
-      let logoY = canvasH - logoH - 4;
+        const desiredH = Math.min(22, Math.max(11, Math.round(bottomAvailable * 0.65)));
+        const desiredW = Math.round(desiredH * aspect);
 
-      // Check if bottom-right overlaps photo; if so, move to right margin whitespace
-      if (logoY < gridBottom + 4 && canvasW - gridRight > logoW + 4) {
-        logoX = canvasW - logoW - 4;
-        logoY = (canvasH - logoH) / 2;
-      }
-
-      if (logoX > 0 && logoY > 0) {
-        ctx.save();
-        // Circular 'G' icon with vibrant blue gradient
-        const grad = ctx.createLinearGradient(logoX, logoY, logoX + 16, logoY + 16);
-        grad.addColorStop(0, '#0066f5');
-        grad.addColorStop(1, '#00d2ff');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(logoX + 8, logoY + 10, 7, 0, Math.PI * 2);
-        ctx.fill();
-
-        // White 'G' monogram
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 8px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('G', logoX + 8, logoY + 10);
-
-        // "GSpaceOne" brand text
-        ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 7px system-ui, sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText('GSpaceOne', logoX + 18, logoY + 6);
-
-        // "PhotoID" pill badge
-        ctx.fillStyle = '#0070f3';
-        if (typeof ctx.roundRect === 'function') {
-          ctx.beginPath();
-          ctx.roundRect(logoX + 18, logoY + 9, 48, 9, 3);
-          ctx.fill();
-        } else {
-          ctx.fillRect(logoX + 18, logoY + 9, 48, 9);
+        if (bottomAvailable >= desiredH + 4) {
+          // Bottom whitespace (centered)
+          const logoX = (canvasW - desiredW) / 2;
+          const logoY = gridBottom + (bottomAvailable - desiredH) / 2;
+          ctx.drawImage(logoImg, logoX, logoY, desiredW, desiredH);
+        } else if (rightAvailable >= desiredW + 4) {
+          // Right margin whitespace
+          const logoX = gridRight + (rightAvailable - desiredW) / 2;
+          const logoY = (canvasH - desiredH) / 2;
+          ctx.drawImage(logoImg, logoX, logoY, desiredW, desiredH);
         }
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 6px system-ui, sans-serif';
-        ctx.fillText('PhotoID 📷', logoX + 21, logoY + 16);
-        ctx.restore();
       }
     };
 
@@ -372,6 +355,20 @@ export const PrintPreview: React.FC = () => {
 
         {/* Actions Container */}
         <div style={{ marginTop: 'auto', paddingTop: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* Brand Logo Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Brand Logo on Sheet:</span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', color: 'var(--text-primary)', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={showBrandLogo}
+                onChange={(e) => setShowBrandLogo(e.target.checked)}
+                style={{ accentColor: 'var(--accent-light)', cursor: 'pointer' }}
+              />
+              {showBrandLogo ? 'Included' : 'Hidden'}
+            </label>
+          </div>
+
           {/* Swap Big Area View Button */}
           <button
             type="button"

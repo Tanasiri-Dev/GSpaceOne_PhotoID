@@ -6,6 +6,7 @@ import { FloatingSettings } from './components/settings/FloatingSettings';
 import { PrintPreview } from './components/print/PrintPreview';
 import { ImageInfoModal } from './components/info/ImageInfoModal';
 import { useFloatingWindow } from './hooks/useFloatingWindow';
+import appIcon from './assets/app-icon.png';
 
 // Quick Preset Specification matching user reference sheet
 interface QuickSizePreset {
@@ -63,12 +64,17 @@ export const App: React.FC = () => {
     }
   }, [isSettingsOpen, isSettingsSubwindow]);
 
+  const isOpeningDialogRef = useRef<boolean>(false);
+
   /**
    * Handle Open Image through native Tauri file dialog, with browser fallback.
-   * Defers loadImage by 60ms to let the Windows native modal window handle cleanly destroy,
-   * completely resolving the intermittent dialog freeze bug.
+   * Uses isOpeningDialogRef mutex to prevent duplicate dialogs when clicking quickly or bubbling.
+   * Defers loadImage by 50ms so Windows comctl32 cleanly unhooks and closes the dialog window immediately.
    */
   const handleOpenImage = useCallback(async () => {
+    if (isOpeningDialogRef.current) return;
+    isOpeningDialogRef.current = true;
+
     try {
       const isTauri = typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
       if (isTauri) {
@@ -85,14 +91,18 @@ export const App: React.FC = () => {
         if (selected && typeof selected === 'string') {
           setTimeout(async () => {
             await loadImage(selected);
-          }, 60);
+          }, 50);
         }
       } else {
         fileInputRef.current?.click();
       }
-    } catch {
-      // Fallback to HTML input element when running outside Tauri or if dialog plugin errors
+    } catch (err) {
+      console.warn('openDialog error, falling back to input:', err);
       fileInputRef.current?.click();
+    } finally {
+      setTimeout(() => {
+        isOpeningDialogRef.current = false;
+      }, 350);
     }
   }, [loadImage]);
 
@@ -181,7 +191,12 @@ export const App: React.FC = () => {
       <header className="toolbar">
         {/* Brand Identity */}
         <div className="toolbar-brand">
-          <div className="toolbar-logo">GS</div>
+          <img
+            src={appIcon}
+            alt="GSpaceOne Logo"
+            className="toolbar-app-icon"
+            style={{ width: '32px', height: '32px', borderRadius: '7px', objectFit: 'contain' }}
+          />
           <div>
             <span className="toolbar-title">GSpaceOne PhotoID</span>
             <span className="toolbar-subtitle">Tauri v2</span>

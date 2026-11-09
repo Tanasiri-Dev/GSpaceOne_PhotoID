@@ -57,6 +57,7 @@ export interface AppStore {
   selectedIdSize: string;
   selectedPaperSize: string;
   printLayoutInfo: PrintLayoutInfo | null;
+  showBrandLogo: boolean;
 
   // UI state
   settingsWindowOpen: boolean;
@@ -68,6 +69,7 @@ export interface AppStore {
   loadImage: (path: string) => Promise<void>;
   fetchImageInfo: () => Promise<void>;
   setShowInfoModal: (show: boolean) => void;
+  setShowBrandLogo: (show: boolean) => void;
   setWorkspaceMode: (mode: 'editor' | 'sheet') => void;
   toggleWorkspaceMode: () => void;
   setPreviewData: (data: string | null) => void;
@@ -202,12 +204,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
   selectedIdSize: '2"',
   selectedPaperSize: '4×6',
   printLayoutInfo: calculatePrintLayout('2"', '4×6'),
+  showBrandLogo: true,
 
   // UI state
   settingsWindowOpen: false,
   showPrintPreview: true, // Default open so user immediately sees both single photo and sheet
   showInfoModal: false,
   mainWorkspaceMode: 'editor', // 'editor' for single photo, 'sheet' for full sheet view
+
+  setShowBrandLogo: (show: boolean) => set({ showBrandLogo: show }),
 
   // Actions
   loadImage: async (path: string) => {
@@ -421,11 +426,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   saveHighQualityImage: async (outputPath: string) => {
-    const { selectedIdSize, selectedPaperSize } = get();
+    const { selectedIdSize, selectedPaperSize, showBrandLogo } = get();
     return await invoke<string>('save_high_quality_image', {
       idSize: selectedIdSize,
       paperSize: selectedPaperSize,
       outputPath,
+      showLogo: showBrandLogo,
     });
   },
 
@@ -499,6 +505,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       await invoke('execute_print', {
         idSize: state.selectedIdSize,
         paperSize: state.selectedPaperSize,
+        showLogo: state.showBrandLogo,
       });
     } catch (err) {
       console.error('execute_print invoke failed:', err);

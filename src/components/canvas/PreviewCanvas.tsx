@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '../../state/store';
+import brandLogoUrl from '../../assets/GSpaceOne_PhotoID_Logo.png';
 
 interface DragHandle {
   id: 'nw' | 'ne' | 'se' | 'sw' | 'n' | 'e' | 's' | 'w' | 'move';
@@ -32,13 +33,74 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
   const selectedIdSize = useAppStore((state) => state.selectedIdSize);
   const mainWorkspaceMode = useAppStore((state) => state.mainWorkspaceMode);
   const toggleWorkspaceMode = useAppStore((state) => state.toggleWorkspaceMode);
+  const showBrandLogo = useAppStore((state) => state.showBrandLogo);
+  const loadImage = useAppStore((state) => state.loadImage);
 
   // Viewport transformation: scale and offset
   const [scale, setScale] = useState<number>(1);
   const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Loaded Image Object
+  // Loaded Image Objects
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const logoImageRef = useRef<HTMLImageElement | null>(null);
+
+  // Load the official GSpaceOne PhotoID brand logo once
+  useEffect(() => {
+    const img = new Image();
+    img.src = brandLogoUrl;
+    img.onload = () => {
+      logoImageRef.current = img;
+    };
+  }, []);
+
+  // Register native Tauri Drag & Drop listener for files dragged from Windows Explorer
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let isMounted = true;
+
+    const setupTauriDragDrop = async () => {
+      try {
+        const isTauri =
+          typeof window !== 'undefined' &&
+          ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+        if (!isTauri) return;
+
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        const win = getCurrentWindow();
+        unlisten = await win.onDragDropEvent((event) => {
+          if (!isMounted) return;
+          if (event.payload.type === 'over') {
+            setIsDragOver(true);
+          } else if (event.payload.type === 'drop') {
+            setIsDragOver(false);
+            const paths = event.payload.paths;
+            if (paths && paths.length > 0) {
+              const filePath = paths[0];
+              const lower = filePath.toLowerCase();
+              if (
+                ['.png', '.jpg', '.jpeg', '.webp', '.tiff', '.bmp'].some((ext) =>
+                  lower.endsWith(ext)
+                )
+              ) {
+                loadImage(filePath);
+              }
+            }
+          } else {
+            setIsDragOver(false);
+          }
+        });
+      } catch (err) {
+        console.warn('onDragDropEvent registration failed:', err);
+      }
+    };
+
+    setupTauriDragDrop();
+
+    return () => {
+      isMounted = false;
+      if (unlisten) unlisten();
+    };
+  }, [loadImage]);
 
   // Interaction State
   const isPanningRef = useRef<boolean>(false);
@@ -282,59 +344,31 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
         }
       }
 
-      // Draw GSpaceOne PhotoID Brand Emblem in safe margin space
-      const logoW = Math.max(90, Math.round(110 * (sheetW / 600)));
-      const logoH = Math.round(logoW * (24 / 100));
+      // Draw official GSpaceOne PhotoID Brand Logo in safe margin space if enabled (never overlapping photos)
+      if (showBrandLogo && logoImageRef.current) {
+        const logoImg = logoImageRef.current;
+        const aspect = (logoImg.naturalWidth || 1084) / (logoImg.naturalHeight || 291);
 
-      // Calculate safe position outside photos
-      const gridRight = startX + columns * cellW + (columns - 1) * spacing;
-      const gridBottom = startY + rows * cellH + (rows - 1) * spacing;
+        const gridRight = startX + columns * cellW + (columns - 1) * spacing;
+        const gridBottom = startY + rows * cellH + (rows - 1) * spacing;
 
-      let logoX = sheetX + sheetW - logoW - 12;
-      let logoY = sheetY + sheetH - logoH - 10;
+        const bottomAvailable = (sheetY + sheetH) - gridBottom;
+        const rightAvailable = (sheetX + sheetW) - gridRight;
 
-      // If bottom overlaps, place in right whitespace
-      if (logoY < gridBottom + 4 && sheetX + sheetW - gridRight > logoW + 8) {
-        logoX = sheetX + sheetW - logoW - 8;
-        logoY = sheetY + (sheetH - logoH) / 2;
-      }
+        const desiredH = Math.min(32, Math.max(14, Math.round(bottomAvailable * 0.65)));
+        const desiredW = Math.round(desiredH * aspect);
 
-      if (logoX >= sheetX && logoY >= sheetY) {
-        ctx.save();
-        const grad = ctx.createLinearGradient(logoX, logoY, logoX + logoH, logoY + logoH);
-        grad.addColorStop(0, '#0066f5');
-        grad.addColorStop(1, '#00d2ff');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(logoX + logoH / 2, logoY + logoH / 2, logoH / 2 - 2, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${Math.round(logoH * 0.45)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('G', logoX + logoH / 2, logoY + logoH / 2);
-
-        ctx.fillStyle = '#0f172a';
-        ctx.font = `bold ${Math.round(logoH * 0.35)}px sans-serif`;
-        ctx.textAlign = 'left';
-        ctx.fillText('GSpaceOne', logoX + logoH + 4, logoY + logoH * 0.35);
-
-        ctx.fillStyle = '#0070f3';
-        const badgeW = logoW - logoH - 4;
-        const badgeH = logoH * 0.45;
-        if (typeof ctx.roundRect === 'function') {
-          ctx.beginPath();
-          ctx.roundRect(logoX + logoH + 4, logoY + logoH * 0.5, badgeW, badgeH, 2);
-          ctx.fill();
-        } else {
-          ctx.fillRect(logoX + logoH + 4, logoY + logoH * 0.5, badgeW, badgeH);
+        if (bottomAvailable >= desiredH + 6) {
+          // Centered in safe bottom margin whitespace
+          const logoX = sheetX + (sheetW - desiredW) / 2;
+          const logoY = gridBottom + (bottomAvailable - desiredH) / 2;
+          ctx.drawImage(logoImg, logoX, logoY, desiredW, desiredH);
+        } else if (rightAvailable >= desiredW + 8) {
+          // Centered in safe right margin whitespace
+          const logoX = gridRight + (rightAvailable - desiredW) / 2;
+          const logoY = sheetY + (sheetH - desiredH) / 2;
+          ctx.drawImage(logoImg, logoX, logoY, desiredW, desiredH);
         }
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${Math.round(badgeH * 0.7)}px sans-serif`;
-        ctx.fillText('PhotoID 📷', logoX + logoH + 8, logoY + logoH * 0.82);
-        ctx.restore();
       }
 
       ctx.restore();
@@ -721,9 +755,6 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
       ) : (
         <div
           className={`empty-state ${isDragOver ? 'drag-over' : ''}`}
-          onClick={onOpenImage}
-          role="button"
-          tabIndex={0}
         >
           <svg
             className="empty-state-icon"
@@ -742,7 +773,14 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
           <p className="empty-state-desc">
             Supports JPEG, PNG, WEBP, and TIFF. Real-time GPU/CPU pipeline ready.
           </p>
-          <button type="button" className="btn btn-primary" onClick={onOpenImage}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenImage?.();
+            }}
+          >
             Select Image File
           </button>
         </div>

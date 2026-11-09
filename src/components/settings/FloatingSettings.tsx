@@ -26,6 +26,8 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
   const resetCrop = useAppStore((state) => state.resetCrop);
   const setIdSize = useAppStore((state) => state.setIdSize);
   const setPaperSize = useAppStore((state) => state.setPaperSize);
+  const showBrandLogo = useAppStore((state) => state.showBrandLogo);
+  const setShowBrandLogo = useAppStore((state) => state.setShowBrandLogo);
   const fetchImageInfo = useAppStore((state) => state.fetchImageInfo);
   const setShowInfoModal = useAppStore((state) => state.setShowInfoModal);
 
@@ -186,6 +188,44 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
               <option value="A4">A4 (210 × 297 mm)</option>
               <option value="Letter">Letter (216 × 279 mm)</option>
             </select>
+          </div>
+
+          <div
+            className="form-group checkbox-group"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginTop: 'var(--space-md)',
+              padding: '6px 10px',
+              backgroundColor: 'var(--bg-tertiary)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            <input
+              type="checkbox"
+              id="settings-toggle-logo"
+              checked={showBrandLogo}
+              onChange={(e) => setShowBrandLogo(e.target.checked)}
+              style={{
+                width: '16px',
+                height: '16px',
+                accentColor: 'var(--accent-light)',
+                cursor: 'pointer',
+              }}
+            />
+            <label
+              htmlFor="settings-toggle-logo"
+              style={{
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 500,
+                color: 'var(--text-primary)',
+                userSelect: 'none',
+              }}
+            >
+              Include GSpaceOne Logo on Sheet
+            </label>
           </div>
         </section>
 

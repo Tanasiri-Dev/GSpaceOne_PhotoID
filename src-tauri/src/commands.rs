@@ -150,6 +150,7 @@ pub async fn execute_print(
     pool: State<'_, Arc<WorkerPool>>,
     id_size: String,
     paper_size: String,
+    show_logo: Option<bool>,
 ) -> Result<String, String> {
     let pool = pool.inner().clone();
     let state = state.inner().clone();
@@ -180,7 +181,8 @@ pub async fn execute_print(
         );
 
         let layout = compute_layout(id_spec, paper_spec, 300, 0.15);
-        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 300)
+        let show_brand_logo = show_logo.unwrap_or(true);
+        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 300, show_brand_logo)
             .map_err(|e| format!("Failed to render print sheet: {e}"))?;
 
         // Save sheet to temporary directory for OS print spooler
@@ -210,6 +212,7 @@ pub async fn save_high_quality_image(
     id_size: String,
     paper_size: String,
     output_path: String,
+    show_logo: Option<bool>,
 ) -> Result<String, String> {
     let pool = pool.inner().clone();
     let state = state.inner().clone();
@@ -236,7 +239,8 @@ pub async fn save_high_quality_image(
 
         // Render at 600 DPI for commercial photo lab printing quality
         let layout = compute_layout(id_spec, paper_spec, 600, 0.15);
-        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 600)
+        let show_brand_logo = show_logo.unwrap_or(true);
+        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 600, show_brand_logo)
             .map_err(|e| format!("Failed to render 600 DPI print sheet: {e}"))?;
 
         sheet
