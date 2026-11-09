@@ -39,6 +39,7 @@ pub fn run() {
             commands::set_crop,
             commands::get_print_layout,
             commands::execute_print,
+            commands::save_high_quality_image,
             commands::open_settings_window,
             commands::close_settings_window,
             commands::reset_adjustments,

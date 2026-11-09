@@ -23,6 +23,7 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
   const setAdjustment = useAppStore((state) => state.setAdjustment);
   const resetAll = useAppStore((state) => state.resetAll);
   const resetAdjustments = useAppStore((state) => state.resetAdjustments);
+  const resetCrop = useAppStore((state) => state.resetCrop);
   const setIdSize = useAppStore((state) => state.setIdSize);
   const setPaperSize = useAppStore((state) => state.setPaperSize);
 
@@ -133,6 +134,14 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
         <section className="settings-section">
           <div className="section-header">
             <span className="section-title">Crop & Framing</span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={resetCrop}
+              title="Reset crop box back to original uncropped image"
+            >
+              Reset to Original
+            </button>
           </div>
           <CropTool />
         </section>

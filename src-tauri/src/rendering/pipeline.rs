@@ -38,22 +38,20 @@ impl<'a> RenderPipeline<'a> {
         Self { state, gpu }
     }
 
-    /// Render downscaled preview with all non-destructive adjustments applied.
+    /// Render downscaled preview with all non-destructive color adjustments applied.
+    /// Note: Keeps full image bounds for interactive workspace crop manipulation.
     /// Returns PNG-encoded bytes.
     pub fn render_preview(&self, max_size: u32) -> Result<Vec<u8>, RenderError> {
         let full_img = self.state.source_image.as_ref().ok_or(RenderError::NoImageLoaded)?;
 
-        // 1. Non-destructive Crop
-        let cropped = crop_image(full_img, &self.state.crop);
-
-        // 2. Downscale for preview performance
-        let scaled = if max_size > 0 && (cropped.width() > max_size || cropped.height() > max_size) {
-            cropped.resize(max_size, max_size, image::imageops::FilterType::Triangle)
+        // 1. Downscale full image for preview performance
+        let scaled = if max_size > 0 && (full_img.width() > max_size || full_img.height() > max_size) {
+            full_img.resize(max_size, max_size, image::imageops::FilterType::Triangle)
         } else {
-            cropped
+            full_img.clone()
         };
 
-        // 3. Apply color adjustments (GPU with automatic CPU fallback)
+        // 2. Apply color adjustments (GPU with automatic CPU fallback)
         let mut rgba = scaled.to_rgba8();
         apply_pipeline_adjustments(
             &mut rgba,

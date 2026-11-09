@@ -1,16 +1,21 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '../../state/store';
 
 export const PrintPreview: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const previewData = useAppStore((state) => state.previewData);
+  const imageDimensions = useAppStore((state) => state.imageDimensions);
   const selectedIdSize = useAppStore((state) => state.selectedIdSize);
   const selectedPaperSize = useAppStore((state) => state.selectedPaperSize);
   const printLayoutInfo = useAppStore((state) => state.printLayoutInfo);
   const isProcessing = useAppStore((state) => state.isProcessing);
   const executePrint = useAppStore((state) => state.executePrint);
   const computeLayout = useAppStore((state) => state.computeLayout);
+  const saveHighQualityImage = useAppStore((state) => state.saveHighQualityImage);
 
   const cropActive = useAppStore((state) => state.cropActive);
   const cropX = useAppStore((state) => state.cropX);
@@ -23,6 +28,40 @@ export const PrintPreview: React.FC = () => {
     computeLayout();
   }, [selectedIdSize, selectedPaperSize, computeLayout]);
 
+  // Handle Save High Quality Image for photo lab printing
+  const handleSaveHighQuality = useCallback(async () => {
+    if (!previewData || isProcessing || isExporting) return;
+
+    try {
+      setIsExporting(true);
+      setExportNotice(null);
+
+      const sanitizedId = selectedIdSize.replace(/[^a-zA-Z0-9.]/g, '');
+      const sanitizedPaper = selectedPaperSize.replace(/[^a-zA-Z0-9]/g, '');
+      const defaultFileName = `GSpaceOne_PhotoID_${sanitizedId}_${sanitizedPaper}_300DPI.png`;
+
+      const filePath = await saveDialog({
+        title: 'Save High Quality Photo ID Sheet (300 DPI)',
+        defaultPath: defaultFileName,
+        filters: [
+          { name: 'PNG Image (*.png)', extensions: ['png'] },
+          { name: 'JPEG Image (*.jpg)', extensions: ['jpg', 'jpeg'] },
+        ],
+      });
+
+      if (filePath) {
+        await saveHighQualityImage(filePath);
+        setExportNotice('Saved 300 DPI sheet successfully!');
+        setTimeout(() => setExportNotice(null), 4000);
+      }
+    } catch (err) {
+      console.error('Save high quality image failed:', err);
+      setExportNotice('Export failed: ' + String(err));
+    } finally {
+      setIsExporting(false);
+    }
+  }, [previewData, isProcessing, isExporting, selectedIdSize, selectedPaperSize, saveHighQualityImage]);
+
   // Draw the miniature paper sheet and grid of ID photos
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -31,8 +70,8 @@ export const PrintPreview: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const paperW_mm = printLayoutInfo.paperWidthMm;
-    const paperH_mm = printLayoutInfo.paperHeightMm;
+    const paperW_mm = printLayoutInfo.paperWidthMm || 101.6;
+    const paperH_mm = printLayoutInfo.paperHeightMm || 152.4;
 
     // Set preview canvas pixel dimensions based on paper aspect ratio
     const maxDimension = 280;
@@ -54,7 +93,7 @@ export const PrintPreview: React.FC = () => {
     // Millimeter to preview canvas pixel ratio
     const mmToPx = canvasW / paperW_mm;
 
-    // Draw White Paper Background with subtle border
+    // Draw White Paper Background with crisp border
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvasW, canvasH);
 
@@ -85,32 +124,31 @@ export const PrintPreview: React.FC = () => {
           const posX = startX + c * (cellW + spacing);
           const posY = startY + r * (cellH + spacing);
 
-          if (img) {
-            // Draw image cropped or scaled to fit cell
+          if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
             ctx.save();
             ctx.beginPath();
             ctx.rect(posX, posY, cellW, cellH);
             ctx.clip();
 
             if (cropActive && cropWidth > 0 && cropHeight > 0) {
-              ctx.drawImage(
-                img,
-                cropX,
-                cropY,
-                cropWidth,
-                cropHeight,
-                posX,
-                posY,
-                cellW,
-                cellH
-              );
+              const fullW = imageDimensions?.width || img.naturalWidth;
+              const fullH = imageDimensions?.height || img.naturalHeight;
+              const scaleX = img.naturalWidth / fullW;
+              const scaleY = img.naturalHeight / fullH;
+
+              const sx = Math.max(0, Math.min(img.naturalWidth - 1, cropX * scaleX));
+              const sy = Math.max(0, Math.min(img.naturalHeight - 1, cropY * scaleY));
+              const sw = Math.max(1, Math.min(img.naturalWidth - sx, cropWidth * scaleX));
+              const sh = Math.max(1, Math.min(img.naturalHeight - sy, cropHeight * scaleY));
+
+              ctx.drawImage(img, sx, sy, sw, sh, posX, posY, cellW, cellH);
             } else {
               ctx.drawImage(img, posX, posY, cellW, cellH);
             }
             ctx.restore();
           } else {
             // Placeholder photo box
-            ctx.fillStyle = '#e2e8f0';
+            ctx.fillStyle = '#f1f5f9';
             ctx.fillRect(posX, posY, cellW, cellH);
 
             ctx.fillStyle = '#94a3b8';
@@ -120,13 +158,85 @@ export const PrintPreview: React.FC = () => {
             ctx.fillText('Photo', posX + cellW / 2, posY + cellH / 2);
           }
 
-          // Cutting guides / photo border
+          // L-shaped corner cut marks at the 4 corners of each photo cell
+          const tick = Math.max(3, Math.round(5 * (canvasW / 300)));
           ctx.strokeStyle = '#94a3b8';
-          ctx.lineWidth = 0.5;
-          ctx.setLineDash([2, 2]);
-          ctx.strokeRect(posX, posY, cellW, cellH);
-          ctx.setLineDash([]);
+          ctx.lineWidth = 0.75;
+
+          // Top-Left corner
+          ctx.beginPath();
+          ctx.moveTo(posX - tick, posY);
+          ctx.lineTo(posX, posY);
+          ctx.lineTo(posX, posY - tick);
+          ctx.stroke();
+
+          // Top-Right corner
+          ctx.beginPath();
+          ctx.moveTo(posX + cellW + tick, posY);
+          ctx.lineTo(posX + cellW, posY);
+          ctx.lineTo(posX + cellW, posY - tick);
+          ctx.stroke();
+
+          // Bottom-Left corner
+          ctx.beginPath();
+          ctx.moveTo(posX - tick, posY + cellH);
+          ctx.lineTo(posX, posY + cellH);
+          ctx.lineTo(posX, posY + cellH + tick);
+          ctx.stroke();
+
+          // Bottom-Right corner
+          ctx.beginPath();
+          ctx.moveTo(posX + cellW + tick, posY + cellH);
+          ctx.lineTo(posX + cellW, posY + cellH);
+          ctx.lineTo(posX + cellW, posY + cellH + tick);
+          ctx.stroke();
         }
+      }
+
+      // Draw GSpaceOne PhotoID Brand Emblem in the margin
+      const logoW = 84;
+      const logoH = 20;
+      const logoX = canvasW - logoW - 6;
+      const logoY = canvasH - logoH - 4;
+
+      if (logoX > 0 && logoY > 0) {
+        ctx.save();
+        // Circular 'G' icon with vibrant blue gradient
+        const grad = ctx.createLinearGradient(logoX, logoY, logoX + 16, logoY + 16);
+        grad.addColorStop(0, '#0066f5');
+        grad.addColorStop(1, '#00d2ff');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(logoX + 8, logoY + 10, 7, 0, Math.PI * 2);
+        ctx.fill();
+
+        // White 'G' monogram
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 8px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('G', logoX + 8, logoY + 10);
+
+        // "GSpaceOne" brand text
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 7px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('GSpaceOne', logoX + 18, logoY + 6);
+
+        // "PhotoID" pill badge
+        ctx.fillStyle = '#0070f3';
+        if (typeof ctx.roundRect === 'function') {
+          ctx.beginPath();
+          ctx.roundRect(logoX + 18, logoY + 9, 48, 9, 3);
+          ctx.fill();
+        } else {
+          ctx.fillRect(logoX + 18, logoY + 9, 48, 9);
+        }
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 6px system-ui, sans-serif';
+        ctx.fillText('PhotoID 📷', logoX + 21, logoY + 16);
+        ctx.restore();
       }
     };
 
@@ -137,7 +247,16 @@ export const PrintPreview: React.FC = () => {
     } else {
       drawPhotos();
     }
-  }, [printLayoutInfo, previewData, cropActive, cropX, cropY, cropWidth, cropHeight]);
+  }, [
+    printLayoutInfo,
+    previewData,
+    imageDimensions,
+    cropActive,
+    cropX,
+    cropY,
+    cropWidth,
+    cropHeight,
+  ]);
 
   const photoCount = printLayoutInfo?.photoCount || 0;
 
@@ -177,6 +296,27 @@ export const PrintPreview: React.FC = () => {
           </div>
         </div>
 
+        {/* Export Notification Message */}
+        {exportNotice && (
+          <div
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              backgroundColor: exportNotice.includes('fail')
+                ? 'rgba(239, 68, 68, 0.15)'
+                : 'rgba(16, 185, 129, 0.15)',
+              color: exportNotice.includes('fail') ? '#ef4444' : '#10b981',
+              border: `1px solid ${
+                exportNotice.includes('fail') ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)'
+              }`,
+              textAlign: 'center',
+            }}
+          >
+            {exportNotice}
+          </div>
+        )}
+
         {/* Layout Specification Details */}
         <div className="print-meta-grid">
           <div className="meta-box">
@@ -204,13 +344,40 @@ export const PrintPreview: React.FC = () => {
           </div>
         </div>
 
-        {/* Print Execution Action */}
-        <div style={{ marginTop: 'auto', paddingTop: 'var(--space-md)' }}>
+        {/* Actions Container */}
+        <div style={{ marginTop: 'auto', paddingTop: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* Save High Quality for Photo Lab (300 DPI) */}
+          <button
+            type="button"
+            className="btn btn-secondary w-full"
+            disabled={!previewData || isProcessing || isExporting}
+            onClick={handleSaveHighQuality}
+            title="Export 300 DPI high-resolution sheet with crop marks and GSpaceOne logo for photo printing lab"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {isExporting ? 'Exporting 300 DPI...' : 'Save for Lab (300 DPI)'}
+          </button>
+
+          {/* Direct Print Button */}
           <button
             type="button"
             className="btn btn-primary w-full"
             disabled={!previewData || isProcessing}
             onClick={executePrint}
+            title="Send photos to native OS print spooler"
           >
             <svg
               width="15"

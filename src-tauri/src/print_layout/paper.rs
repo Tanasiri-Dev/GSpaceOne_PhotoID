@@ -42,12 +42,12 @@ pub const PAPER_SIZES: &[PaperSize] = &[
     PaperSize { name: "Letter", width_inches: 8.5, height_inches: 11.0 },
 ];
 
-/// Predefined standard ID photo formats.
+/// Predefined standard ID photo formats (standard international / photo lab dimensions).
 pub const ID_SIZES: &[IdPhotoSize] = &[
-    IdPhotoSize { name: "1inch", width_inches: 1.0, height_inches: 1.0 },
-    IdPhotoSize { name: "1.5inch", width_inches: 1.5, height_inches: 2.0 },
-    IdPhotoSize { name: "2inch", width_inches: 2.0, height_inches: 2.0 },
-    IdPhotoSize { name: "2.5inch", width_inches: 2.0, height_inches: 2.5 },
+    IdPhotoSize { name: "1inch", width_inches: 0.984, height_inches: 1.378 }, // 25 × 35 mm
+    IdPhotoSize { name: "1.5inch", width_inches: 1.378, height_inches: 1.772 }, // 35 × 45 mm Standard
+    IdPhotoSize { name: "2inch", width_inches: 2.0, height_inches: 2.0 }, // 50.8 × 50.8 mm US Passport
+    IdPhotoSize { name: "2.5inch", width_inches: 2.0, height_inches: 2.5 }, // 50.8 × 63.5 mm (2.5")
 ];
 
 /// Helper to normalize names for resilient fuzzy lookup.

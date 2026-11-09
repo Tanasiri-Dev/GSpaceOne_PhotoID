@@ -202,6 +202,51 @@ pub async fn execute_print(
     })
 }
 
+/// 5b. Render full 300 DPI high-resolution sheet with crop marks and GSpaceOne logo, saving to file.
+#[tauri::command]
+pub async fn save_high_quality_image(
+    state: State<'_, SharedAppState>,
+    pool: State<'_, Arc<WorkerPool>>,
+    id_size: String,
+    paper_size: String,
+    output_path: String,
+) -> Result<String, String> {
+    let pool = pool.inner().clone();
+    let state = state.inner().clone();
+
+    pool.spawn_blocking(move || {
+        let (source_img, state_snapshot) = {
+            let guard = state.read();
+            let img = guard
+                .source_image
+                .as_ref()
+                .ok_or_else(|| "No source image loaded to export".to_string())?
+                .clone();
+            let snapshot = crate::state::app_state::AppState {
+                source_image: None,
+                adjustments: guard.adjustments,
+                crop: guard.crop,
+                gpu_available: false,
+            };
+            (img, snapshot)
+        };
+
+        let id_spec = find_id_size(&id_size).ok_or_else(|| format!("Unknown ID size: '{id_size}'"))?;
+        let paper_spec = find_paper(&paper_size).ok_or_else(|| format!("Unknown paper size: '{paper_size}'"))?;
+
+        let layout = compute_layout(id_spec, paper_spec, 300, 0.25);
+        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 300)
+            .map_err(|e| format!("Failed to render print sheet: {e}"))?;
+
+        sheet
+            .save(&output_path)
+            .map_err(|e| format!("Failed to save image to '{output_path}': {e}"))?;
+
+        info!("High quality print sheet saved to: {output_path}");
+        Ok(format!("High quality print sheet saved to {output_path}"))
+    })
+}
+
 /// 6. Create or display the detachable/floating Settings window.
 #[tauri::command]
 pub async fn open_settings_window(app: AppHandle) -> Result<(), String> {

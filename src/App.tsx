@@ -1,10 +1,26 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from './state/store';
 import { PreviewCanvas } from './components/canvas/PreviewCanvas';
 import { FloatingSettings } from './components/settings/FloatingSettings';
 import { PrintPreview } from './components/print/PrintPreview';
 import { useFloatingWindow } from './hooks/useFloatingWindow';
+
+// Quick Preset Specification matching user reference sheet
+interface QuickSizePreset {
+  key: string;
+  label: string;
+  cols: number;
+  rows: number;
+  aspectDesc: string;
+}
+
+const QUICK_SIZE_PRESETS: QuickSizePreset[] = [
+  { key: '1"', label: '1 inch', cols: 4, rows: 4, aspectDesc: '25 × 35 mm (16 per sheet)' },
+  { key: '1.5"', label: '1.5 inch', cols: 3, rows: 4, aspectDesc: '35 × 45 mm (10-12 per sheet)' },
+  { key: '2"', label: '2 inch', cols: 2, rows: 3, aspectDesc: '50.8 × 50.8 mm US Visa (6 per sheet)' },
+  { key: '2.5"', label: '2.5 inch', cols: 2, rows: 2, aspectDesc: '50.8 × 63.5 mm (4 per sheet)' },
+];
 
 export const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -12,9 +28,16 @@ export const App: React.FC = () => {
   const previewData = useAppStore((state) => state.previewData);
   const isProcessing = useAppStore((state) => state.isProcessing);
   const showPrintPreview = useAppStore((state) => state.showPrintPreview);
+  const selectedIdSize = useAppStore((state) => state.selectedIdSize);
+  const selectedPaperSize = useAppStore((state) => state.selectedPaperSize);
+  const cropActive = useAppStore((state) => state.cropActive);
+
   const loadImage = useAppStore((state) => state.loadImage);
   const setPreviewData = useAppStore((state) => state.setPreviewData);
   const resetAll = useAppStore((state) => state.resetAll);
+  const resetCrop = useAppStore((state) => state.resetCrop);
+  const applyIdCropPreset = useAppStore((state) => state.applyIdCropPreset);
+  const saveHighQualityImage = useAppStore((state) => state.saveHighQualityImage);
   const executePrint = useAppStore((state) => state.executePrint);
   const togglePrintPreview = useAppStore((state) => state.togglePrintPreview);
 
@@ -23,6 +46,7 @@ export const App: React.FC = () => {
 
   // Docked settings panel visibility in the main window
   const [dockedSettingsVisible, setDockedSettingsVisible] = useState<boolean>(true);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
   // If this window is the dedicated floating settings window
   const isSettingsSubwindow = isCurrentWindowSettings();
@@ -87,6 +111,38 @@ export const App: React.FC = () => {
     }
   };
 
+  /**
+   * Handle Save High Quality Image for photo lab printing
+   */
+  const handleSaveHighQuality = useCallback(async () => {
+    if (!previewData || isProcessing) return;
+
+    try {
+      const sanitizedId = selectedIdSize.replace(/[^a-zA-Z0-9.]/g, '');
+      const sanitizedPaper = selectedPaperSize.replace(/[^a-zA-Z0-9]/g, '');
+      const defaultFileName = `GSpaceOne_PhotoID_${sanitizedId}_${sanitizedPaper}_300DPI.png`;
+
+      const filePath = await saveDialog({
+        title: 'Save High Quality Photo ID Sheet (300 DPI)',
+        defaultPath: defaultFileName,
+        filters: [
+          { name: 'PNG Image (*.png)', extensions: ['png'] },
+          { name: 'JPEG Image (*.jpg)', extensions: ['jpg', 'jpeg'] },
+        ],
+      });
+
+      if (filePath) {
+        await saveHighQualityImage(filePath);
+        setSaveSuccessMsg('300 DPI sheet exported!');
+        setTimeout(() => setSaveSuccessMsg(null), 3500);
+      }
+    } catch (err) {
+      console.error('Save high quality image failed:', err);
+      setSaveSuccessMsg('Export error: ' + String(err));
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
+    }
+  }, [previewData, isProcessing, selectedIdSize, selectedPaperSize, saveHighQualityImage]);
+
   // If this window is loaded as the detached settings window
   if (isSettingsSubwindow) {
     return (
@@ -109,6 +165,7 @@ export const App: React.FC = () => {
 
       {/* Top Application Toolbar */}
       <header className="toolbar">
+        {/* Brand Identity */}
         <div className="toolbar-brand">
           <div className="toolbar-logo">GS</div>
           <div>
@@ -117,6 +174,60 @@ export const App: React.FC = () => {
           </div>
         </div>
 
+        {/* Center: Quick ID Size Presets (1", 1.5", 2", 2.5") with Miniature Grid Cards */}
+        <div className="toolbar-quick-sizes" role="group" aria-label="Quick ID Photo Size Selection">
+          {QUICK_SIZE_PRESETS.map((preset) => {
+            const isSelected = selectedIdSize === preset.key;
+            return (
+              <button
+                key={preset.key}
+                type="button"
+                className={`quick-size-card ${isSelected ? 'active' : ''}`}
+                onClick={() => applyIdCropPreset(preset.key)}
+                title={`Select ${preset.label} (${preset.aspectDesc}) - automatically adjusts crop framing and print layout`}
+              >
+                <div className="quick-size-icon-wrapper">
+                  <svg width="22" height="26" viewBox="0 0 22 26" fill="none">
+                    {/* Sheet Outline */}
+                    <rect
+                      x="1"
+                      y="1"
+                      width="20"
+                      height="24"
+                      rx="2"
+                      fill="#ffffff"
+                      stroke={isSelected ? '#e12d4d' : '#94a3b8'}
+                      strokeWidth="1"
+                    />
+                    {/* Yellow ID Grid Boxes */}
+                    {Array.from({ length: preset.rows }).map((_, r) => {
+                      return Array.from({ length: preset.cols }).map((_, c) => {
+                        const cellW = (16 - (preset.cols - 1) * 1.5) / preset.cols;
+                        const cellH = (20 - (preset.rows - 1) * 1.5) / preset.rows;
+                        const x = 3 + c * (cellW + 1.5);
+                        const y = 3 + r * (cellH + 1.5);
+                        return (
+                          <rect
+                            key={`${r}-${c}`}
+                            x={x}
+                            y={y}
+                            width={cellW}
+                            height={cellH}
+                            rx="0.5"
+                            fill="#f59e0b"
+                          />
+                        );
+                      });
+                    })}
+                  </svg>
+                </div>
+                <span className="quick-size-label">{preset.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right Toolbar Actions */}
         <div className="toolbar-actions">
           {/* Open Image Button */}
           <button
@@ -141,6 +252,57 @@ export const App: React.FC = () => {
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
             Open Image
+          </button>
+
+          {/* Reset to Original Image Button */}
+          <button
+            type="button"
+            className={`btn btn-secondary ${cropActive ? 'btn-highlight-subtle' : ''}`}
+            onClick={resetCrop}
+            disabled={!previewData || isProcessing}
+            title="Reset crop box back to original uncropped image"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+              <path d="M3 21v-5h5" />
+            </svg>
+            Reset to Original
+          </button>
+
+          {/* Save High Quality Image for Photo Lab (300 DPI) */}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleSaveHighQuality}
+            disabled={!previewData || isProcessing}
+            title="Save 300 DPI high-resolution sheet with crop marks and GSpaceOne logo for photo printing lab"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            {saveSuccessMsg || 'Save for Lab'}
           </button>
 
           {/* Toggle Settings Panel Button */}
@@ -217,7 +379,7 @@ export const App: React.FC = () => {
             Print
           </button>
 
-          {/* Reset Button */}
+          {/* Reset All Button */}
           <button
             type="button"
             className="btn btn-secondary btn-icon"

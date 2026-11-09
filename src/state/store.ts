@@ -50,8 +50,11 @@ export interface AppStore {
   setPreviewData: (data: string | null) => void;
   setImageDimensions: (width: number, height: number) => void;
   applyAdjustments: () => Promise<void>;
-  setCrop: (x: number, y: number, w: number, h: number) => void;
-  setCropActive: (active: boolean) => void;
+  setCrop: (x: number, y: number, w: number, h: number) => Promise<void>;
+  setCropActive: (active: boolean) => Promise<void>;
+  resetCrop: () => Promise<void>;
+  applyIdCropPreset: (sizeKey: string) => Promise<void>;
+  saveHighQualityImage: (outputPath: string) => Promise<string>;
   setAdjustment: (key: 'brightness' | 'exposure' | 'gamma', value: number) => void;
   resetAdjustments: () => void;
   toggleSettingsWindow: () => void;
@@ -74,10 +77,10 @@ export const PAPER_DIMENSIONS_MM: Record<string, { width: number; height: number
 
 // Standard Photo ID Dimensions in Millimeters
 export const ID_DIMENSIONS_MM: Record<string, { width: number; height: number }> = {
-  '1"': { width: 25.4, height: 35.0 },
+  '1"': { width: 25.0, height: 35.0 },
   '1.5"': { width: 35.0, height: 45.0 },
   '2"': { width: 50.8, height: 50.8 },
-  '2.5"': { width: 60.0, height: 70.0 },
+  '2.5"': { width: 50.8, height: 63.5 },
 };
 
 /**
@@ -285,6 +288,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setCropActive: async (active: boolean) => {
     set({ cropActive: active });
     if (!active) {
+      const dim = get().imageDimensions;
+      set({
+        cropX: 0,
+        cropY: 0,
+        cropWidth: dim ? dim.width : 0,
+        cropHeight: dim ? dim.height : 0,
+      });
       try {
         const updatedPreview = await invoke<string>('set_crop', {
           x: 0,
@@ -299,6 +309,75 @@ export const useAppStore = create<AppStore>((set, get) => ({
         console.warn('reset_crop invoke failed:', err);
       }
     }
+  },
+
+  resetCrop: async () => {
+    const dim = get().imageDimensions;
+    const w = dim ? dim.width : 0;
+    const h = dim ? dim.height : 0;
+    set({
+      cropActive: false,
+      cropX: 0,
+      cropY: 0,
+      cropWidth: w,
+      cropHeight: h,
+    });
+    try {
+      const updatedPreview = await invoke<string>('set_crop', {
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+      });
+      if (updatedPreview) {
+        set({ previewData: updatedPreview });
+      }
+    } catch (err) {
+      console.warn('set_crop reset invoke failed:', err);
+    }
+    get().computeLayout();
+  },
+
+  applyIdCropPreset: async (sizeKey: string) => {
+    const dim = get().imageDimensions;
+    if (!dim || dim.width <= 0 || dim.height <= 0) {
+      get().setIdSize(sizeKey);
+      return;
+    }
+
+    const idDim = ID_DIMENSIONS_MM[sizeKey] || ID_DIMENSIONS_MM['1.5"'];
+    const targetAspect = idDim.width / idDim.height;
+    const imgAspect = dim.width / dim.height;
+
+    let rw: number;
+    let rh: number;
+
+    // Scale crop window to fill 92% of the smaller dimension, centered
+    if (imgAspect > targetAspect) {
+      rh = Math.round(dim.height * 0.92);
+      rw = Math.round(rh * targetAspect);
+    } else {
+      rw = Math.round(dim.width * 0.92);
+      rh = Math.round(rw / targetAspect);
+    }
+
+    rw = Math.min(rw, dim.width);
+    rh = Math.min(rh, dim.height);
+    const rx = Math.round((dim.width - rw) / 2);
+    const ry = Math.round((dim.height - rh) / 2);
+
+    set({ selectedIdSize: sizeKey });
+    await get().setCrop(rx, ry, rw, rh);
+    await get().computeLayout();
+  },
+
+  saveHighQualityImage: async (outputPath: string) => {
+    const { selectedIdSize, selectedPaperSize } = get();
+    return await invoke<string>('save_high_quality_image', {
+      idSize: selectedIdSize,
+      paperSize: selectedPaperSize,
+      outputPath,
+    });
   },
 
   setAdjustment: (key: 'brightness' | 'exposure' | 'gamma', value: number) => {

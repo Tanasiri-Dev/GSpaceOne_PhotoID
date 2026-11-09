@@ -12,6 +12,7 @@ export const CropTool: React.FC = () => {
   const imageDimensions = useAppStore((state) => state.imageDimensions);
   const setCrop = useAppStore((state) => state.setCrop);
   const setCropActive = useAppStore((state) => state.setCropActive);
+  const resetCrop = useAppStore((state) => state.resetCrop);
 
   const [preset, setPreset] = useState<AspectPreset>('free');
   const [lockAspect, setLockAspect] = useState<boolean>(false);
@@ -110,12 +111,7 @@ export const CropTool: React.FC = () => {
   };
 
   const handleClearCrop = () => {
-    setCropActive(false);
-    if (imageDimensions) {
-      setCrop(0, 0, imageDimensions.width, imageDimensions.height);
-      setInputWidth(imageDimensions.width);
-      setInputHeight(imageDimensions.height);
-    }
+    resetCrop();
     setPreset('free');
     setLockAspect(false);
   };

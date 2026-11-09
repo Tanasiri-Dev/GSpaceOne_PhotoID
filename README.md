@@ -54,12 +54,15 @@ Built with **Tauri v2** (Rust backend) and **React 18** (TypeScript frontend), i
 - **Interactive Crop Tool**: 8-handle crop overlay with aspect ratio presets (Free, 1:1, 3:4, 2:3)
 - **Thread-safe UI**: Heavy image processing runs on background threads — the UI never freezes
 
-### 🖨️ Smart Print Layout
+### 🖨️ Smart Print Layout & Photo Lab Export
 - **Auto-tiling Algorithm**: Maximizes the number of ID photos per sheet by evaluating both portrait and landscape orientations
-- **Standard ID Sizes**: 1", 1.5", 2", 2.5" formats
+- **Standard ID Sizes**: 1" (25×35mm), 1.5" (35×45mm), 2" (50.8×50.8mm US Visa), 2.5" (50.8×63.5mm)
 - **Paper Sizes**: 4×6, 5×7, A4, Letter
-- **High-quality Output**: Lanczos3 resampling from full-resolution source with hairline cutting guides
-- **Native OS Print API**: Direct integration with Windows `PrintDlg` and macOS `NSPrintOperation`
+- **Quick Preset Buttons**: Instant header toolbar buttons with miniature layout icons for 1", 1.5", 2", and 2.5" formats
+- **One-Click Crop Recovery**: "Reset to Original" button restores the full uncropped image instantly
+- **High-Quality Photo Lab Export (300 DPI)**: Exports print-ready sheets with L-shaped corner cut marks and the signature GSpaceOne PhotoID brand emblem
+- **Lanczos3 Resampling**: Ultra-crisp downsampling/upsampling directly from the high-resolution source
+- **Native OS Print API**: Direct integration with Windows print spooler and macOS `NSPrintOperation`
 
 ---
 
@@ -80,21 +83,19 @@ Built with **Tauri v2** (Rust backend) and **React 18** (TypeScript frontend), i
 - **Double-click** any slider value to reset it to default
 - All adjustments are non-destructive and update in real-time
 
-### Step 3: Crop the Photo
-- Select an aspect ratio preset or enter custom dimensions
-- Drag the crop handles on the canvas to define the ID photo region
-- Click **"Apply Crop"** to confirm
+### Step 3: Select ID Size & Crop
+- Use the **Quick Size Buttons** on the top toolbar (`1"`, `1.5"`, `2"`, `2.5"`) to automatically set the ID size and center the crop box with the matching aspect ratio
+- Drag the crop handles on the canvas to refine framing if needed
+- If you make a mistake or want to start over, click **"Reset to Original"** to restore the full image immediately
 
-### Step 4: Configure Print Layout
-- Select your **ID Photo Size** (1", 1.5", 2", 2.5")
+### Step 4: Configure Print Layout & Preview
 - Select your **Paper Size** (4×6, 5×7, A4, Letter)
-- The app automatically calculates the maximum number of photos that fit
-- Preview the layout in the **Print Preview** panel
+- The app automatically calculates the optimal layout with centered margins and spacing
+- Click **"Print Preview"** to inspect the sheet layout, L-shaped corner cut marks, and brand emblem
 
-### Step 5: Print
-- Click **"Print"** to send the optimized layout to your printer
-- The app uses native OS print dialogs for maximum compatibility
-- High-resolution output at 300 DPI with cutting guides
+### Step 5: Print or Export for Photo Lab
+- **Send to Printer**: Click **"Print"** to send the sheet directly to your local OS print spooler
+- **Save for Photo Lab**: Click **"Save for Lab"** (or in the Print Preview panel) to export a standalone 300 DPI high-resolution PNG/JPEG ready for professional photo lab printing
 
 ### Keyboard Shortcuts
 | Shortcut | Action |

@@ -61,7 +61,7 @@
   --transition-normal: 200ms cubic-bezier(0.4, 0, 0.2, 1);
 
   /* Dimensions */
-  --toolbar-height: 52px;
+  --toolbar-height: 58px;
   --sidebar-width: 340px;
 }
 
@@ -179,6 +179,66 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+}
+
+/* Quick ID Size Preset Cards in Header */
+.toolbar-quick-sizes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: rgba(15, 23, 42, 0.45);
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.quick-size-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px 8px;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  min-width: 52px;
+}
+
+.quick-size-card:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+  transform: translateY(-1px);
+}
+
+.quick-size-card.active {
+  background-color: rgba(225, 45, 77, 0.16);
+  border-color: var(--highlight);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(225, 45, 77, 0.28);
+}
+
+.quick-size-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.quick-size-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.btn-highlight-subtle {
+  border-color: rgba(225, 45, 77, 0.4);
+  color: #ff758f;
 }
 
 /* Buttons */
