@@ -3,6 +3,7 @@ name = "gspaceone-photoid"
 version = "0.1.0"
 edition = "2021"
 description = "High-performance ID photo printing application"
+authors = ["GSpaceOne (MIT)"]
 
 [lib]
 name = "gspaceone_photoid_lib"

@@ -36,6 +36,8 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "GSpaceOne (MIT)",
+    "copyright": "Copyright © 2026 GSpaceOne (MIT)",
     "targets": [
       "msi",
       "nsis",
