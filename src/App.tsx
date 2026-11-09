@@ -4,6 +4,7 @@ import { useAppStore } from './state/store';
 import { PreviewCanvas } from './components/canvas/PreviewCanvas';
 import { FloatingSettings } from './components/settings/FloatingSettings';
 import { PrintPreview } from './components/print/PrintPreview';
+import { ImageInfoModal } from './components/info/ImageInfoModal';
 import { useFloatingWindow } from './hooks/useFloatingWindow';
 
 // Quick Preset Specification matching user reference sheet
@@ -31,8 +32,12 @@ export const App: React.FC = () => {
   const selectedIdSize = useAppStore((state) => state.selectedIdSize);
   const selectedPaperSize = useAppStore((state) => state.selectedPaperSize);
   const cropActive = useAppStore((state) => state.cropActive);
+  const mainWorkspaceMode = useAppStore((state) => state.mainWorkspaceMode);
 
   const loadImage = useAppStore((state) => state.loadImage);
+  const fetchImageInfo = useAppStore((state) => state.fetchImageInfo);
+  const setShowInfoModal = useAppStore((state) => state.setShowInfoModal);
+  const toggleWorkspaceMode = useAppStore((state) => state.toggleWorkspaceMode);
   const setPreviewData = useAppStore((state) => state.setPreviewData);
   const resetAll = useAppStore((state) => state.resetAll);
   const resetCrop = useAppStore((state) => state.resetCrop);
@@ -59,22 +64,31 @@ export const App: React.FC = () => {
   }, [isSettingsOpen, isSettingsSubwindow]);
 
   /**
-   * Handle Open Image through native Tauri file dialog, with browser fallback
+   * Handle Open Image through native Tauri file dialog, with browser fallback.
+   * Defers loadImage by 60ms to let the Windows native modal window handle cleanly destroy,
+   * completely resolving the intermittent dialog freeze bug.
    */
   const handleOpenImage = useCallback(async () => {
     try {
-      const selected = await openDialog({
-        multiple: false,
-        filters: [
-          {
-            name: 'Images',
-            extensions: ['png', 'jpg', 'jpeg', 'webp', 'tiff', 'bmp'],
-          },
-        ],
-      });
+      const isTauri = typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+      if (isTauri) {
+        const selected = await openDialog({
+          multiple: false,
+          filters: [
+            {
+              name: 'Images',
+              extensions: ['png', 'jpg', 'jpeg', 'webp', 'tiff', 'bmp'],
+            },
+          ],
+        });
 
-      if (selected && typeof selected === 'string') {
-        await loadImage(selected);
+        if (selected && typeof selected === 'string') {
+          setTimeout(async () => {
+            await loadImage(selected);
+          }, 60);
+        }
+      } else {
+        fileInputRef.current?.click();
       }
     } catch {
       // Fallback to HTML input element when running outside Tauri or if dialog plugin errors
@@ -112,7 +126,7 @@ export const App: React.FC = () => {
   };
 
   /**
-   * Handle Save High Quality Image for photo lab printing
+   * Handle Save High Quality Image for photo lab printing (600 DPI)
    */
   const handleSaveHighQuality = useCallback(async () => {
     if (!previewData || isProcessing) return;
@@ -120,10 +134,10 @@ export const App: React.FC = () => {
     try {
       const sanitizedId = selectedIdSize.replace(/[^a-zA-Z0-9.]/g, '');
       const sanitizedPaper = selectedPaperSize.replace(/[^a-zA-Z0-9]/g, '');
-      const defaultFileName = `GSpaceOne_PhotoID_${sanitizedId}_${sanitizedPaper}_300DPI.png`;
+      const defaultFileName = `GSpaceOne_PhotoID_${sanitizedId}_${sanitizedPaper}_600DPI.png`;
 
       const filePath = await saveDialog({
-        title: 'Save High Quality Photo ID Sheet (300 DPI)',
+        title: 'Save High Quality Photo ID Sheet (600 DPI)',
         defaultPath: defaultFileName,
         filters: [
           { name: 'PNG Image (*.png)', extensions: ['png'] },
@@ -133,7 +147,7 @@ export const App: React.FC = () => {
 
       if (filePath) {
         await saveHighQualityImage(filePath);
-        setSaveSuccessMsg('300 DPI sheet exported!');
+        setSaveSuccessMsg('600 DPI sheet exported!');
         setTimeout(() => setSaveSuccessMsg(null), 3500);
       }
     } catch (err) {
@@ -280,13 +294,13 @@ export const App: React.FC = () => {
             Reset to Original
           </button>
 
-          {/* Save High Quality Image for Photo Lab (300 DPI) */}
+          {/* Save High Quality Image for Photo Lab (600 DPI) */}
           <button
             type="button"
             className="btn btn-secondary"
             onClick={handleSaveHighQuality}
             disabled={!previewData || isProcessing}
-            title="Save 300 DPI high-resolution sheet with crop marks and GSpaceOne logo for photo printing lab"
+            title="Save 600 DPI high-resolution sheet with crop marks and GSpaceOne logo for photo printing lab"
           >
             <svg
               width="15"
@@ -302,7 +316,30 @@ export const App: React.FC = () => {
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            {saveSuccessMsg || 'Save for Lab'}
+            {saveSuccessMsg || 'Save for Lab (600 DPI)'}
+          </button>
+
+          {/* Swap Main Workspace View (Editor vs Full Print Sheet) */}
+          <button
+            type="button"
+            className={`btn btn-secondary ${mainWorkspaceMode === 'sheet' ? 'btn-active' : ''}`}
+            onClick={toggleWorkspaceMode}
+            disabled={!previewData}
+            title={mainWorkspaceMode === 'sheet' ? 'Switch back to Single Photo Editor View' : 'Swap big area to Full Print Sheet View'}
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+            </svg>
+            {mainWorkspaceMode === 'sheet' ? 'Edit Photo' : 'Swap View'}
           </button>
 
           {/* Toggle Settings Panel Button */}
@@ -379,6 +416,33 @@ export const App: React.FC = () => {
             Print
           </button>
 
+          {/* Image Info & EXIF Metadata Modal Button */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-icon"
+            onClick={() => {
+              fetchImageInfo();
+              setShowInfoModal(true);
+            }}
+            disabled={!previewData}
+            title="View Image Information & EXIF Metadata"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="16" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12.01" y2="8" />
+            </svg>
+          </button>
+
           {/* Reset All Button */}
           <button
             type="button"
@@ -416,6 +480,9 @@ export const App: React.FC = () => {
         {/* Optional Print Preview Side Panel */}
         {showPrintPreview && <PrintPreview />}
       </main>
+
+      {/* Image Info & EXIF Modal */}
+      <ImageInfoModal />
     </div>
   );
 };

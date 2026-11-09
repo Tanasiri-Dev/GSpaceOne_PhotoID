@@ -27,6 +27,12 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
   const cropHeight = useAppStore((state) => state.cropHeight);
   const setCrop = useAppStore((state) => state.setCrop);
 
+  const printLayoutInfo = useAppStore((state) => state.printLayoutInfo);
+  const selectedPaperSize = useAppStore((state) => state.selectedPaperSize);
+  const selectedIdSize = useAppStore((state) => state.selectedIdSize);
+  const mainWorkspaceMode = useAppStore((state) => state.mainWorkspaceMode);
+  const toggleWorkspaceMode = useAppStore((state) => state.toggleWorkspaceMode);
+
   // Viewport transformation: scale and offset
   const [scale, setScale] = useState<number>(1);
   const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -76,31 +82,23 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
     [offset, scale]
   );
 
-  // Load preview data into HTMLImageElement
-  useEffect(() => {
-    if (!previewData) {
-      imageRef.current = null;
-      return;
-    }
-
-    const img = new Image();
-    img.onload = () => {
-      imageRef.current = img;
-      if (!imageDimensions || imageDimensions.width !== img.width || imageDimensions.height !== img.height) {
-        setImageDimensions(img.width, img.height);
-      }
-      fitImageToContainer(img.width, img.height);
-    };
-    img.src = previewData.startsWith('data:') ? previewData : `data:image/png;base64,${previewData}`;
-  }, [previewData]);
+  // Convert Canvas coordinate back to Image space
+  const canvasToImage = useCallback(
+    (canvasX: number, canvasY: number) => {
+      const imgX = (canvasX - offset.x) / scale;
+      const imgY = (canvasY - offset.y) / scale;
+      return { x: imgX, y: imgY };
+    },
+    [offset, scale]
+  );
 
   // Auto-fit image to container viewport
   const fitImageToContainer = useCallback((imgWidth: number, imgHeight: number) => {
     const container = containerRef.current;
-    if (!container || imgWidth === 0 || imgHeight === 0) return;
+    if (!container || imgWidth <= 0 || imgHeight <= 0) return;
 
-    const contW = container.clientWidth - 40;
-    const contH = container.clientHeight - 40;
+    const contW = Math.max(100, container.clientWidth - 40);
+    const contH = Math.max(100, container.clientHeight - 40);
 
     const scaleW = contW / imgWidth;
     const scaleH = contH / imgHeight;
@@ -113,23 +111,63 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
     setOffset({ x: initialOffsetX, y: initialOffsetY });
   }, []);
 
-  // Handle Resize of Container
+  // Load preview data into HTMLImageElement
   useEffect(() => {
-    const handleResize = () => {
-      if (containerRef.current && canvasRef.current) {
-        canvasRef.current.width = containerRef.current.clientWidth;
-        canvasRef.current.height = containerRef.current.clientHeight;
+    if (!previewData) {
+      imageRef.current = null;
+      return;
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      imageRef.current = img;
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      if (!imageDimensions || imageDimensions.width !== w || imageDimensions.height !== h) {
+        setImageDimensions(w, h);
+      }
+      fitImageToContainer(w, h);
+    };
+    img.src = previewData.startsWith('data:') ? previewData : `data:image/png;base64,${previewData}`;
+  }, [previewData, setImageDimensions, fitImageToContainer]);
+
+  // Robust ResizeObserver: synchronizes canvas buffer dimensions to container at all times
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const updateCanvasSize = () => {
+      const canvas = canvasRef.current;
+      if (canvas && container) {
+        if (canvas.width !== container.clientWidth || canvas.height !== container.clientHeight) {
+          canvas.width = container.clientWidth;
+          canvas.height = container.clientHeight;
+        }
       }
     };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+
+    updateCanvasSize();
+
+    const ro = new ResizeObserver(() => {
+      updateCanvasSize();
+    });
+    ro.observe(container);
+
+    return () => ro.disconnect();
+  }, [previewData]);
 
   // Main Render Loop with requestAnimationFrame
   const render = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    // Safety check to ensure buffer is always in sync with DOM container
+    if (canvas.width !== container.clientWidth || canvas.height !== container.clientHeight) {
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+    }
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -139,17 +177,182 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
     const img = imageRef.current;
     if (!img) return;
 
+    const imgW = img.naturalWidth || img.width;
+    const imgH = img.naturalHeight || img.height;
+
     ctx.save();
 
-    // Draw the main image
+    // ─────────────────────────────────────────────────────────────
+    // MODE A: FULL PRINT SHEET VIEW IN LARGE WORKSPACE
+    // ─────────────────────────────────────────────────────────────
+    if (mainWorkspaceMode === 'sheet' && printLayoutInfo) {
+      const paperW_mm = printLayoutInfo.paperWidthMm || 101.6;
+      const paperH_mm = printLayoutInfo.paperHeightMm || 152.4;
+
+      // Base paper size in canvas units
+      const baseSheetW = Math.min(canvas.width * 0.82, canvas.height * 0.82 * (paperW_mm / paperH_mm));
+      const sheetW = baseSheetW * scale;
+      const sheetH = (sheetW / (paperW_mm / paperH_mm));
+
+      const sheetX = offset.x + (canvas.width - sheetW) / 2;
+      const sheetY = offset.y + (canvas.height - sheetH) / 2;
+
+      // Drop shadow for paper sheet
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+      ctx.shadowBlur = 24;
+      ctx.shadowOffsetY = 8;
+
+      // Draw white paper sheet
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sheetX, sheetY, sheetW, sheetH);
+
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      // Subtle sheet border
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sheetX, sheetY, sheetW, sheetH);
+
+      // Millimeter to pixel scale factor on sheet
+      const mmToSheetPx = sheetW / paperW_mm;
+
+      const {
+        columns,
+        rows,
+        idWidthMm,
+        idHeightMm,
+        marginHorizontalMm,
+        marginVerticalMm,
+        spacingMm,
+      } = printLayoutInfo;
+
+      const cellW = idWidthMm * mmToSheetPx;
+      const cellH = idHeightMm * mmToSheetPx;
+      const spacing = spacingMm * mmToSheetPx;
+      const startX = sheetX + marginHorizontalMm * mmToSheetPx;
+      const startY = sheetY + marginVerticalMm * mmToSheetPx;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < columns; c++) {
+          const posX = startX + c * (cellW + spacing);
+          const posY = startY + r * (cellH + spacing);
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(posX, posY, cellW, cellH);
+          ctx.clip();
+
+          if (cropActive && cropWidth > 0 && cropHeight > 0) {
+            const scaleX = imgW / (imageDimensions?.width || imgW);
+            const scaleY = imgH / (imageDimensions?.height || imgH);
+            const sx = Math.max(0, Math.min(imgW - 1, cropX * scaleX));
+            const sy = Math.max(0, Math.min(imgH - 1, cropY * scaleY));
+            const sw = Math.max(1, Math.min(imgW - sx, cropWidth * scaleX));
+            const sh = Math.max(1, Math.min(imgH - sy, cropHeight * scaleY));
+
+            ctx.drawImage(img, sx, sy, sw, sh, posX, posY, cellW, cellH);
+          } else {
+            ctx.drawImage(img, posX, posY, cellW, cellH);
+          }
+          ctx.restore();
+
+          // L-shaped corner cut marks at 4 corners
+          const tick = Math.max(4, Math.round(6 * (cellW / 120)));
+          ctx.strokeStyle = '#94a3b8';
+          ctx.lineWidth = 1;
+
+          // Top-Left
+          ctx.beginPath();
+          ctx.moveTo(posX - tick, posY); ctx.lineTo(posX, posY); ctx.lineTo(posX, posY - tick);
+          ctx.stroke();
+          // Top-Right
+          ctx.beginPath();
+          ctx.moveTo(posX + cellW + tick, posY); ctx.lineTo(posX + cellW, posY); ctx.lineTo(posX + cellW, posY - tick);
+          ctx.stroke();
+          // Bottom-Left
+          ctx.beginPath();
+          ctx.moveTo(posX - tick, posY + cellH); ctx.lineTo(posX, posY + cellH); ctx.lineTo(posX, posY + cellH + tick);
+          ctx.stroke();
+          // Bottom-Right
+          ctx.beginPath();
+          ctx.moveTo(posX + cellW + tick, posY + cellH); ctx.lineTo(posX + cellW, posY + cellH); ctx.lineTo(posX + cellW, posY + cellH + tick);
+          ctx.stroke();
+        }
+      }
+
+      // Draw GSpaceOne PhotoID Brand Emblem in safe margin space
+      const logoW = Math.max(90, Math.round(110 * (sheetW / 600)));
+      const logoH = Math.round(logoW * (24 / 100));
+
+      // Calculate safe position outside photos
+      const gridRight = startX + columns * cellW + (columns - 1) * spacing;
+      const gridBottom = startY + rows * cellH + (rows - 1) * spacing;
+
+      let logoX = sheetX + sheetW - logoW - 12;
+      let logoY = sheetY + sheetH - logoH - 10;
+
+      // If bottom overlaps, place in right whitespace
+      if (logoY < gridBottom + 4 && sheetX + sheetW - gridRight > logoW + 8) {
+        logoX = sheetX + sheetW - logoW - 8;
+        logoY = sheetY + (sheetH - logoH) / 2;
+      }
+
+      if (logoX >= sheetX && logoY >= sheetY) {
+        ctx.save();
+        const grad = ctx.createLinearGradient(logoX, logoY, logoX + logoH, logoY + logoH);
+        grad.addColorStop(0, '#0066f5');
+        grad.addColorStop(1, '#00d2ff');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(logoX + logoH / 2, logoY + logoH / 2, logoH / 2 - 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.round(logoH * 0.45)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('G', logoX + logoH / 2, logoY + logoH / 2);
+
+        ctx.fillStyle = '#0f172a';
+        ctx.font = `bold ${Math.round(logoH * 0.35)}px sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.fillText('GSpaceOne', logoX + logoH + 4, logoY + logoH * 0.35);
+
+        ctx.fillStyle = '#0070f3';
+        const badgeW = logoW - logoH - 4;
+        const badgeH = logoH * 0.45;
+        if (typeof ctx.roundRect === 'function') {
+          ctx.beginPath();
+          ctx.roundRect(logoX + logoH + 4, logoY + logoH * 0.5, badgeW, badgeH, 2);
+          ctx.fill();
+        } else {
+          ctx.fillRect(logoX + logoH + 4, logoY + logoH * 0.5, badgeW, badgeH);
+        }
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.round(badgeH * 0.7)}px sans-serif`;
+        ctx.fillText('PhotoID 📷', logoX + logoH + 8, logoY + logoH * 0.82);
+        ctx.restore();
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // MODE B: SINGLE PHOTO EDITOR VIEW (DEFAULT)
+    // ─────────────────────────────────────────────────────────────
     const imgDrawX = offset.x;
     const imgDrawY = offset.y;
-    const imgDrawW = img.width * scale;
-    const imgDrawH = img.height * scale;
+    const imgDrawW = imgW * scale;
+    const imgDrawH = imgH * scale;
 
+    // Draw main image
     ctx.drawImage(img, imgDrawX, imgDrawY, imgDrawW, imgDrawH);
 
-    // If Crop is Active, Draw Crop Overlay
+    // If Crop is Active, Draw Shaded Cutout & 8 Handles
     if (cropActive && cropWidth > 0 && cropHeight > 0) {
       const cropP1 = imageToCanvas(cropX, cropY);
       const cropP2 = imageToCanvas(cropX + cropWidth, cropY + cropHeight);
@@ -159,14 +362,16 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
       const cW = Math.abs(cropP2.x - cropP1.x);
       const cH = Math.abs(cropP2.y - cropP1.y);
 
-      // Semi-transparent dark overlay outside crop region
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-      ctx.beginPath();
-      // Outer rect
-      ctx.rect(0, 0, canvas.width, canvas.height);
-      // Cutout inner crop rect
-      ctx.rect(cX, cY + cH, cW, -cH);
-      ctx.fill();
+      // Shaded overlay outside crop box using 4 clean rectangular strips (bug-free)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      // Top strip
+      if (cY > 0) ctx.fillRect(0, 0, canvas.width, cY);
+      // Bottom strip
+      if (cY + cH < canvas.height) ctx.fillRect(0, cY + cH, canvas.width, canvas.height - (cY + cH));
+      // Left strip
+      if (cX > 0) ctx.fillRect(0, cY, cX, cH);
+      // Right strip
+      if (cX + cW < canvas.width) ctx.fillRect(cX + cW, cY, canvas.width - (cX + cW), cH);
 
       // Crop border
       ctx.strokeStyle = '#ffffff';
@@ -174,24 +379,18 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
       ctx.strokeRect(cX, cY, cW, cH);
 
       // Rule of thirds grid lines
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      // Vertical thirds
-      ctx.moveTo(cX + cW / 3, cY);
-      ctx.lineTo(cX + cW / 3, cY + cH);
-      ctx.moveTo(cX + (2 * cW) / 3, cY);
-      ctx.lineTo(cX + (2 * cW) / 3, cY + cH);
-      // Horizontal thirds
-      ctx.moveTo(cX, cY + cH / 3);
-      ctx.lineTo(cX + cW, cY + cH / 3);
-      ctx.moveTo(cX, cY + (2 * cH) / 3);
-      ctx.lineTo(cX + cW, cY + (2 * cH) / 3);
+      ctx.moveTo(cX + cW / 3, cY); ctx.lineTo(cX + cW / 3, cY + cH);
+      ctx.moveTo(cX + (2 * cW) / 3, cY); ctx.lineTo(cX + (2 * cW) / 3, cY + cH);
+      ctx.moveTo(cX, cY + cH / 3); ctx.lineTo(cX + cW, cY + cH / 3);
+      ctx.moveTo(cX, cY + (2 * cH) / 3); ctx.lineTo(cX + cW, cY + (2 * cH) / 3);
       ctx.stroke();
 
       // Crop Corner and Edge Handles
-      const handleSize = 8;
-      ctx.fillStyle = '#e94560';
+      const handleSize = 9;
+      ctx.fillStyle = '#e12d4d';
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
 
@@ -216,7 +415,19 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
     }
 
     ctx.restore();
-  }, [offset, scale, cropActive, cropX, cropY, cropWidth, cropHeight, imageToCanvas]);
+  }, [
+    offset,
+    scale,
+    cropActive,
+    cropX,
+    cropY,
+    cropWidth,
+    cropHeight,
+    imageToCanvas,
+    mainWorkspaceMode,
+    printLayoutInfo,
+    imageDimensions,
+  ]);
 
   // Schedule render via RAF
   useEffect(() => {
@@ -273,7 +484,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
   // Mouse Wheel: Zoom centered at mouse pointer
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    if (!imageRef.current) return;
+    if (!imageRef.current && mainWorkspaceMode !== 'sheet') return;
 
     const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
     const newScale = Math.min(Math.max(0.05, scale * zoomFactor), 15);
@@ -297,109 +508,108 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
     if (!imageRef.current) return;
 
     const { x, y } = getCanvasCoordinates(e);
-    const handle = getHandleAtPosition(x, y);
 
-    if (cropActive && handle) {
-      activeHandleRef.current = handle;
-      cropDragStartRef.current = {
-        mouseX: e.clientX,
-        mouseY: e.clientY,
-        initialCrop: { x: cropX, y: cropY, w: cropWidth, h: cropHeight },
-      };
-    } else {
-      isPanningRef.current = true;
-      panStartRef.current = {
-        x: e.clientX - offset.x,
-        y: e.clientY - offset.y,
-      };
-      setActiveCursor('grabbing');
+    // If in single photo mode with active crop, check crop handles
+    if (mainWorkspaceMode === 'editor' && cropActive) {
+      const handle = getHandleAtPosition(x, y);
+      if (handle) {
+        activeHandleRef.current = handle;
+        cropDragStartRef.current = {
+          mouseX: x,
+          mouseY: y,
+          initialCrop: { x: cropX, y: cropY, w: cropWidth, h: cropHeight },
+        };
+        return;
+      }
     }
+
+    // Otherwise initiate canvas panning
+    isPanningRef.current = true;
+    panStartRef.current = { x: e.clientX - offset.x, y: e.clientY - offset.y };
   };
 
   // Mouse Move
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!imageRef.current) return;
-
     const { x, y } = getCanvasCoordinates(e);
 
-    // If dragging crop handle or moving crop box
+    // Update cursor style
+    if (!isPanningRef.current && !activeHandleRef.current) {
+      if (mainWorkspaceMode === 'editor' && cropActive) {
+        const handle = getHandleAtPosition(x, y);
+        if (handle) {
+          const cursors: Record<string, string> = {
+            nw: 'nwse-resize',
+            ne: 'nesw-resize',
+            se: 'nwse-resize',
+            sw: 'nesw-resize',
+            n: 'ns-resize',
+            e: 'ew-resize',
+            s: 'ns-resize',
+            w: 'ew-resize',
+            move: 'move',
+          };
+          setActiveCursor(cursors[handle] || 'default');
+          return;
+        }
+      }
+      setActiveCursor(isPanningRef.current ? 'grabbing' : 'default');
+    }
+
+    // Handle Active Crop Dragging
     if (activeHandleRef.current) {
-      const deltaX = (e.clientX - cropDragStartRef.current.mouseX) / scale;
-      const deltaY = (e.clientY - cropDragStartRef.current.mouseY) / scale;
+      const handle = activeHandleRef.current;
       const { initialCrop } = cropDragStartRef.current;
-      const imgW = imageDimensions?.width || 2000;
-      const imgH = imageDimensions?.height || 2000;
+      const curImgCoord = canvasToImage(x, y);
+      const startImgCoord = canvasToImage(
+        cropDragStartRef.current.mouseX,
+        cropDragStartRef.current.mouseY
+      );
+
+      const deltaX = curImgCoord.x - startImgCoord.x;
+      const deltaY = curImgCoord.y - startImgCoord.y;
+
+      const imgW = imageDimensions?.width || 4000;
+      const imgH = imageDimensions?.height || 4000;
 
       let newX = initialCrop.x;
       let newY = initialCrop.y;
       let newW = initialCrop.w;
       let newH = initialCrop.h;
 
-      switch (activeHandleRef.current) {
-        case 'move':
-          newX = Math.max(0, Math.min(imgW - initialCrop.w, initialCrop.x + deltaX));
-          newY = Math.max(0, Math.min(imgH - initialCrop.h, initialCrop.y + deltaY));
-          break;
-        case 'se':
-          newW = Math.max(20, Math.min(imgW - initialCrop.x, initialCrop.w + deltaX));
-          newH = Math.max(20, Math.min(imgH - initialCrop.y, initialCrop.h + deltaY));
-          break;
-        case 'nw':
-          newX = Math.max(0, initialCrop.x + deltaX);
-          newY = Math.max(0, initialCrop.y + deltaY);
+      if (handle === 'move') {
+        newX = Math.max(0, Math.min(imgW - initialCrop.w, initialCrop.x + deltaX));
+        newY = Math.max(0, Math.min(imgH - initialCrop.h, initialCrop.y + deltaY));
+      } else {
+        if (handle.includes('w')) {
+          const maxLeftDelta = initialCrop.w - 20;
+          const actualDeltaX = Math.min(maxLeftDelta, deltaX);
+          newX = Math.max(0, initialCrop.x + actualDeltaX);
           newW = initialCrop.w - (newX - initialCrop.x);
-          newH = initialCrop.h - (newY - initialCrop.y);
-          break;
-        case 'ne':
-          newY = Math.max(0, initialCrop.y + deltaY);
+        }
+        if (handle.includes('e')) {
           newW = Math.max(20, Math.min(imgW - initialCrop.x, initialCrop.w + deltaX));
+        }
+        if (handle.includes('n')) {
+          const maxTopDelta = initialCrop.h - 20;
+          const actualDeltaY = Math.min(maxTopDelta, deltaY);
+          newY = Math.max(0, initialCrop.y + actualDeltaY);
           newH = initialCrop.h - (newY - initialCrop.y);
-          break;
-        case 'sw':
-          newX = Math.max(0, initialCrop.x + deltaX);
-          newW = initialCrop.w - (newX - initialCrop.x);
+        }
+        if (handle.includes('s')) {
           newH = Math.max(20, Math.min(imgH - initialCrop.y, initialCrop.h + deltaY));
-          break;
-        case 'e':
-          newW = Math.max(20, Math.min(imgW - initialCrop.x, initialCrop.w + deltaX));
-          break;
-        case 's':
-          newH = Math.max(20, Math.min(imgH - initialCrop.y, initialCrop.h + deltaY));
-          break;
-        case 'w':
-          newX = Math.max(0, initialCrop.x + deltaX);
-          newW = initialCrop.w - (newX - initialCrop.x);
-          break;
-        case 'n':
-          newY = Math.max(0, initialCrop.y + deltaY);
-          newH = initialCrop.h - (newY - initialCrop.y);
-          break;
+        }
       }
 
       setCrop(newX, newY, newW, newH);
       return;
     }
 
-    // If panning canvas
+    // Handle Panning
     if (isPanningRef.current) {
       setOffset({
         x: e.clientX - panStartRef.current.x,
         y: e.clientY - panStartRef.current.y,
       });
-      return;
-    }
-
-    // Update cursor based on hover
-    if (cropActive) {
-      const handle = getHandleAtPosition(x, y);
-      if (handle === 'move') setActiveCursor('move');
-      else if (handle === 'nw' || handle === 'se') setActiveCursor('nwse-resize');
-      else if (handle === 'ne' || handle === 'sw') setActiveCursor('nesw-resize');
-      else if (handle === 'n' || handle === 's') setActiveCursor('ns-resize');
-      else if (handle === 'e' || handle === 'w') setActiveCursor('ew-resize');
-      else setActiveCursor('crosshair');
-    } else {
-      setActiveCursor('grab');
     }
   };
 
@@ -407,10 +617,9 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
   const handleMouseUp = () => {
     isPanningRef.current = false;
     activeHandleRef.current = null;
-    setActiveCursor(cropActive ? 'crosshair' : 'grab');
   };
 
-  // Drag and drop file handling
+  // Drag & Drop
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(true);
@@ -420,22 +629,20 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
     setIsDragOver(false);
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const result = event.target?.result as string;
-          if (result) {
-            setPreviewData(result);
-          }
-        };
-        reader.readAsDataURL(file);
-      }
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        if (result) {
+          setPreviewData(result);
+        }
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -460,8 +667,37 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
             onMouseLeave={handleMouseUp}
           />
 
+          {/* Floating View Mode Switcher: Swap between Single Photo and Print Sheet */}
+          <div className="canvas-view-switcher">
+            <button
+              type="button"
+              className="btn btn-secondary canvas-view-toggle"
+              onClick={toggleWorkspaceMode}
+              title="Swap between Single Photo editing and Full Print Sheet preview"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+              </svg>
+              {mainWorkspaceMode === 'sheet'
+                ? '⇄ Switch to Single Photo Edit'
+                : '⇄ Switch to Full Sheet View'}
+            </button>
+          </div>
+
           {/* Status info overlay */}
           <div className="canvas-status-bar">
+            <span className="canvas-status-item">
+              Mode: <strong>{mainWorkspaceMode === 'sheet' ? 'Print Sheet' : 'Single Photo'}</strong>
+            </span>
             <span className="canvas-status-item">
               Zoom: <strong>{Math.round(scale * 100)}%</strong>
             </span>
@@ -470,9 +706,14 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
                 Size: {imageDimensions.width} × {imageDimensions.height} px
               </span>
             )}
-            {cropActive && cropWidth > 0 && (
+            {cropActive && cropWidth > 0 && mainWorkspaceMode === 'editor' && (
               <span className="canvas-status-item">
                 Crop: {Math.round(cropWidth)} × {Math.round(cropHeight)} px
+              </span>
+            )}
+            {mainWorkspaceMode === 'sheet' && printLayoutInfo && (
+              <span className="canvas-status-item">
+                Layout: {printLayoutInfo.photoCount} photos on {selectedPaperSize} ({selectedIdSize})
               </span>
             )}
           </div>
@@ -507,11 +748,11 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
         </div>
       )}
 
-      {/* Processing Spinner Overlay */}
+      {/* Non-blocking Compact Processing Pill Toast */}
       {isProcessing && (
-        <div className="processing-overlay">
-          <div className="spinner" />
-          <div className="processing-text">Processing Image...</div>
+        <div className="processing-pill">
+          <div className="spinner-sm" />
+          <span>Processing...</span>
         </div>
       )}
     </div>

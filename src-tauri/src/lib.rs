@@ -46,6 +46,7 @@ pub fn run() {
             commands::get_adjustments,
             commands::get_crop,
             commands::get_supported_sizes,
+            commands::get_image_info,
         ])
         // Setup lifecycle hook: initializes Rayon worker pool & GPU compute engine
         .setup(move |app| {

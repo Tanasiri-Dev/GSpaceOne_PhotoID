@@ -16,6 +16,9 @@ export const PrintPreview: React.FC = () => {
   const executePrint = useAppStore((state) => state.executePrint);
   const computeLayout = useAppStore((state) => state.computeLayout);
   const saveHighQualityImage = useAppStore((state) => state.saveHighQualityImage);
+  const mainWorkspaceMode = useAppStore((state) => state.mainWorkspaceMode);
+  const toggleWorkspaceMode = useAppStore((state) => state.toggleWorkspaceMode);
+  const setWorkspaceMode = useAppStore((state) => state.setWorkspaceMode);
 
   const cropActive = useAppStore((state) => state.cropActive);
   const cropX = useAppStore((state) => state.cropX);
@@ -28,7 +31,7 @@ export const PrintPreview: React.FC = () => {
     computeLayout();
   }, [selectedIdSize, selectedPaperSize, computeLayout]);
 
-  // Handle Save High Quality Image for photo lab printing
+  // Handle Save High Quality Image (600 DPI) for commercial photo lab printing
   const handleSaveHighQuality = useCallback(async () => {
     if (!previewData || isProcessing || isExporting) return;
 
@@ -38,10 +41,10 @@ export const PrintPreview: React.FC = () => {
 
       const sanitizedId = selectedIdSize.replace(/[^a-zA-Z0-9.]/g, '');
       const sanitizedPaper = selectedPaperSize.replace(/[^a-zA-Z0-9]/g, '');
-      const defaultFileName = `GSpaceOne_PhotoID_${sanitizedId}_${sanitizedPaper}_300DPI.png`;
+      const defaultFileName = `GSpaceOne_PhotoID_${sanitizedId}_${sanitizedPaper}_600DPI.png`;
 
       const filePath = await saveDialog({
-        title: 'Save High Quality Photo ID Sheet (300 DPI)',
+        title: 'Save Ultra High Quality Photo ID Sheet (600 DPI)',
         defaultPath: defaultFileName,
         filters: [
           { name: 'PNG Image (*.png)', extensions: ['png'] },
@@ -51,7 +54,7 @@ export const PrintPreview: React.FC = () => {
 
       if (filePath) {
         await saveHighQualityImage(filePath);
-        setExportNotice('Saved 300 DPI sheet successfully!');
+        setExportNotice('Saved 600 DPI sheet successfully!');
         setTimeout(() => setExportNotice(null), 4000);
       }
     } catch (err) {
@@ -193,11 +196,21 @@ export const PrintPreview: React.FC = () => {
         }
       }
 
-      // Draw GSpaceOne PhotoID Brand Emblem in the margin
+      // Draw GSpaceOne PhotoID Brand Emblem in safe margin space (never overlapping photos)
       const logoW = 84;
       const logoH = 20;
-      const logoX = canvasW - logoW - 6;
-      const logoY = canvasH - logoH - 4;
+
+      const gridRight = startX + columns * cellW + (columns - 1) * spacing;
+      const gridBottom = startY + rows * cellH + (rows - 1) * spacing;
+
+      let logoX = canvasW - logoW - 6;
+      let logoY = canvasH - logoH - 4;
+
+      // Check if bottom-right overlaps photo; if so, move to right margin whitespace
+      if (logoY < gridBottom + 4 && canvasW - gridRight > logoW + 4) {
+        logoX = canvasW - logoW - 4;
+        logoY = (canvasH - logoH) / 2;
+      }
 
       if (logoX > 0 && logoY > 0) {
         ctx.save();
@@ -262,7 +275,7 @@ export const PrintPreview: React.FC = () => {
 
   return (
     <div className="side-panel">
-      {/* Header */}
+      {/* Header with Swap View button */}
       <div className="side-panel-header">
         <div className="side-panel-title">
           <svg
@@ -281,6 +294,14 @@ export const PrintPreview: React.FC = () => {
           </svg>
           Print Layout Preview
         </div>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={toggleWorkspaceMode}
+          title="Swap layout preview into large central workspace"
+        >
+          ⇄ Swap
+        </button>
       </div>
 
       <div className="side-panel-body">
@@ -289,8 +310,13 @@ export const PrintPreview: React.FC = () => {
           {photoCount} {photoCount === 1 ? 'photo' : 'photos'} on {selectedPaperSize} paper
         </div>
 
-        {/* Paper Sheet Preview Container */}
-        <div className="print-preview-container">
+        {/* Paper Sheet Preview Container (Click to expand to center workspace) */}
+        <div
+          className="print-preview-container"
+          onClick={() => setWorkspaceMode('sheet')}
+          title="Click to view full layout in center workspace"
+          style={{ cursor: 'pointer' }}
+        >
           <div className="print-sheet-wrapper">
             <canvas ref={canvasRef} className="print-sheet-canvas" />
           </div>
@@ -346,13 +372,35 @@ export const PrintPreview: React.FC = () => {
 
         {/* Actions Container */}
         <div style={{ marginTop: 'auto', paddingTop: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {/* Save High Quality for Photo Lab (300 DPI) */}
+          {/* Swap Big Area View Button */}
+          <button
+            type="button"
+            className="btn btn-secondary w-full"
+            onClick={toggleWorkspaceMode}
+            title="Swap big area between single photo and sheet view"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+            </svg>
+            {mainWorkspaceMode === 'sheet' ? 'Show Photo in Center' : 'Expand Sheet to Center'}
+          </button>
+
+          {/* Save High Quality for Photo Lab (600 DPI) */}
           <button
             type="button"
             className="btn btn-secondary w-full"
             disabled={!previewData || isProcessing || isExporting}
             onClick={handleSaveHighQuality}
-            title="Export 300 DPI high-resolution sheet with crop marks and GSpaceOne logo for photo printing lab"
+            title="Export 600 DPI ultra-high-resolution sheet with crop marks and GSpaceOne logo for commercial photo printing lab"
           >
             <svg
               width="15"
@@ -368,7 +416,7 @@ export const PrintPreview: React.FC = () => {
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            {isExporting ? 'Exporting 300 DPI...' : 'Save for Lab (300 DPI)'}
+            {isExporting ? 'Exporting 600 DPI...' : 'Save for Lab (600 DPI)'}
           </button>
 
           {/* Direct Print Button */}

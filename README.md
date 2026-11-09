@@ -50,8 +50,10 @@ Built with **Tauri v2** (Rust backend) and **React 18** (TypeScript frontend), i
 
 ### 🪟 Workspace & Floating UI
 - **Central Preview Canvas**: Interactive canvas with smooth zoom (mouse wheel) and pan (drag)
+- **Big Area View Swapping**: Instantly toggle the main large workspace between **Single Photo Editor View** and **Full Print Sheet Layout View**
 - **Detachable Settings Window**: Float the settings panel as a separate always-on-top window, or dock it as a side panel
 - **Interactive Crop Tool**: 8-handle crop overlay with aspect ratio presets (Free, 1:1, 3:4, 2:3)
+- **Camera EXIF & Image Metadata Inspector**: Inspect image dimensions, megapixels, aspect ratio, camera make/model, lens, ISO, shutter speed, aperture, and color pipeline settings
 - **Thread-safe UI**: Heavy image processing runs on background threads — the UI never freezes
 
 ### 🖨️ Smart Print Layout & Photo Lab Export
@@ -60,7 +62,8 @@ Built with **Tauri v2** (Rust backend) and **React 18** (TypeScript frontend), i
 - **Paper Sizes**: 4×6, 5×7, A4, Letter
 - **Quick Preset Buttons**: Instant header toolbar buttons with miniature layout icons for 1", 1.5", 2", and 2.5" formats
 - **One-Click Crop Recovery**: "Reset to Original" button restores the full uncropped image instantly
-- **High-Quality Photo Lab Export (300 DPI)**: Exports print-ready sheets with L-shaped corner cut marks and the signature GSpaceOne PhotoID brand emblem
+- **Ultra High-Quality Photo Lab Export (600 DPI Best Quality)**: Exports 600 DPI commercial-lab-ready sheets with precision cut marks and safe-margin GSpaceOne brand emblem
+- **Intelligent Brand Logo Placement**: Dynamic collision detection prevents the logo from ever overlapping photo cells, positioning it safely in margin whitespace
 - **Lanczos3 Resampling**: Ultra-crisp downsampling/upsampling directly from the high-resolution source
 - **Native OS Print API**: Direct integration with Windows print spooler and macOS `NSPrintOperation`
 
@@ -95,7 +98,9 @@ Built with **Tauri v2** (Rust backend) and **React 18** (TypeScript frontend), i
 
 ### Step 5: Print or Export for Photo Lab
 - **Send to Printer**: Click **"Print"** to send the sheet directly to your local OS print spooler
-- **Save for Photo Lab**: Click **"Save for Lab"** (or in the Print Preview panel) to export a standalone 300 DPI high-resolution PNG/JPEG ready for professional photo lab printing
+- **Save for Photo Lab (600 DPI)**: Click **"Save for Lab (600 DPI)"** to export a standalone 600 DPI ultra-high-resolution PNG/JPEG ready for professional photo lab printing
+- **Inspect Metadata**: Click **"ℹ️ Info / EXIF"** near Reset All to inspect camera, lens, exposure, and crop geometry specifications
+- **Swap View**: Click **"⇄ Swap View"** to inspect the full tiled sheet in the big main workspace
 
 ### Keyboard Shortcuts
 | Shortcut | Action |

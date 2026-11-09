@@ -139,7 +139,7 @@ pub fn get_print_layout(
         )
     })?;
 
-    let layout = compute_layout(id_spec, paper_spec, 300, 0.25);
+    let layout = compute_layout(id_spec, paper_spec, 300, 0.15);
     Ok(PrintLayoutInfo::from(&layout))
 }
 
@@ -179,7 +179,7 @@ pub async fn execute_print(
             id_spec.name, paper_spec.name
         );
 
-        let layout = compute_layout(id_spec, paper_spec, 300, 0.25);
+        let layout = compute_layout(id_spec, paper_spec, 300, 0.15);
         let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 300)
             .map_err(|e| format!("Failed to render print sheet: {e}"))?;
 
@@ -202,7 +202,7 @@ pub async fn execute_print(
     })
 }
 
-/// 5b. Render full 300 DPI high-resolution sheet with crop marks and GSpaceOne logo, saving to file.
+/// 5b. Render full 600 DPI ultra-high-resolution sheet with crop marks and GSpaceOne logo, saving to file.
 #[tauri::command]
 pub async fn save_high_quality_image(
     state: State<'_, SharedAppState>,
@@ -234,16 +234,17 @@ pub async fn save_high_quality_image(
         let id_spec = find_id_size(&id_size).ok_or_else(|| format!("Unknown ID size: '{id_size}'"))?;
         let paper_spec = find_paper(&paper_size).ok_or_else(|| format!("Unknown paper size: '{paper_size}'"))?;
 
-        let layout = compute_layout(id_spec, paper_spec, 300, 0.25);
-        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 300)
-            .map_err(|e| format!("Failed to render print sheet: {e}"))?;
+        // Render at 600 DPI for commercial photo lab printing quality
+        let layout = compute_layout(id_spec, paper_spec, 600, 0.15);
+        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 600)
+            .map_err(|e| format!("Failed to render 600 DPI print sheet: {e}"))?;
 
         sheet
             .save(&output_path)
             .map_err(|e| format!("Failed to save image to '{output_path}': {e}"))?;
 
-        info!("High quality print sheet saved to: {output_path}");
-        Ok(format!("High quality print sheet saved to {output_path}"))
+        info!("High quality 600 DPI print sheet saved to: {output_path}");
+        Ok(format!("High quality 600 DPI print sheet saved to {output_path}"))
     })
 }
 
@@ -367,4 +368,120 @@ fn dispatch_native_print(path: &std::path::Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Metadata and EXIF information extracted from an image file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageMetadataInfo {
+    pub file_path: String,
+    pub file_name: String,
+    pub file_size_formatted: String,
+    pub width: u32,
+    pub height: u32,
+    pub megapixels: String,
+    pub aspect_ratio: String,
+    pub camera_model: Option<String>,
+    pub lens_model: Option<String>,
+    pub iso: Option<String>,
+    pub shutter_speed: Option<String>,
+    pub aperture: Option<String>,
+    pub date_time: Option<String>,
+}
+
+/// Extract detailed file metadata and EXIF tags from the image file.
+#[tauri::command]
+pub fn get_image_info(
+    state: State<'_, SharedAppState>,
+    path: String,
+) -> Result<ImageMetadataInfo, String> {
+    let guard = state.read();
+    let img = guard
+        .source_image
+        .as_ref()
+        .ok_or_else(|| "No source image loaded in state".to_string())?;
+
+    let width = img.width();
+    let height = img.height();
+    let mp = format!("{:.2} MP", (width as f64 * height as f64) / 1_000_000.0);
+
+    // Calculate aspect ratio
+    fn gcd(mut a: u32, mut b: u32) -> u32 {
+        while b != 0 {
+            let t = b;
+            b = a % b;
+            a = t;
+        }
+        a
+    }
+    let g = gcd(width, height);
+    let aspect_ratio = if g > 0 {
+        format!("{}:{}", width / g, height / g)
+    } else {
+        "1:1".to_string()
+    };
+
+    let p = std::path::Path::new(&path);
+    let file_name = p
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("image.png")
+        .to_string();
+
+    let file_size_formatted = match std::fs::metadata(&path) {
+        Ok(meta) => {
+            let len = meta.len();
+            if len >= 1_048_576 {
+                format!("{:.2} MB", len as f64 / 1_048_576.0)
+            } else {
+                format!("{:.1} KB", len as f64 / 1024.0)
+            }
+        }
+        Err(_) => "Unknown".to_string(),
+    };
+
+    let mut camera_model = None;
+    let mut lens_model = None;
+    let mut iso = None;
+    let mut shutter_speed = None;
+    let mut aperture = None;
+    let mut date_time = None;
+
+    if let Ok(file) = std::fs::File::open(&path) {
+        let mut bufreader = std::io::BufReader::new(&file);
+        let exifreader = exif::Reader::new();
+        if let Ok(exif) = exifreader.read_from_container(&mut bufreader) {
+            for f in exif.fields() {
+                match f.tag {
+                    exif::Tag::Model => camera_model = Some(f.display_value().with_unit(&exif).to_string()),
+                    exif::Tag::LensModel => lens_model = Some(f.display_value().with_unit(&exif).to_string()),
+                    exif::Tag::PhotographicSensitivity => iso = Some(f.display_value().with_unit(&exif).to_string()),
+                    exif::Tag::ExposureTime => shutter_speed = Some(f.display_value().with_unit(&exif).to_string()),
+                    exif::Tag::FNumber => aperture = Some(f.display_value().with_unit(&exif).to_string()),
+                    exif::Tag::DateTimeOriginal | exif::Tag::DateTime => {
+                        if date_time.is_none() {
+                            date_time = Some(f.display_value().with_unit(&exif).to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    Ok(ImageMetadataInfo {
+        file_path: path,
+        file_name,
+        file_size_formatted,
+        width,
+        height,
+        megapixels: mp,
+        aspect_ratio,
+        camera_model,
+        lens_model,
+        iso,
+        shutter_speed,
+        aperture,
+        date_time,
+    })
 }

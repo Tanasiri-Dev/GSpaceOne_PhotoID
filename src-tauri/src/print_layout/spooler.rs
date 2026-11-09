@@ -316,8 +316,8 @@ pub fn render_print_sheet(
         );
     }
 
-    // 6. Draw GSpaceOne PhotoID branding logo in the bottom-right margin (like lab print sheets)
-    draw_gspaceone_logo(&mut sheet, layout.paper_width_px, layout.paper_height_px);
+    // 6. Draw GSpaceOne PhotoID branding logo in safe margin space (never overlapping photos)
+    draw_gspaceone_logo(&mut sheet, layout, _dpi);
 
     Ok(DynamicImage::ImageRgba8(sheet))
 }
@@ -433,20 +433,72 @@ fn draw_bitmap_string(
     }
 }
 
-/// Draws GSpaceOne PhotoID brand emblem in the margin space (bottom-right).
-fn draw_gspaceone_logo(sheet: &mut RgbaImage, page_w: u32, page_h: u32) {
-    let logo_w = 310u32;
-    let logo_h = 74u32;
-    if page_w < logo_w + 40 || page_h < logo_h + 40 {
+/// Draws GSpaceOne PhotoID brand emblem in a collision-safe margin area (never overlaps photos).
+fn draw_gspaceone_logo(sheet: &mut RgbaImage, layout: &PrintLayout, dpi: u32) {
+    let page_w = sheet.width();
+    let page_h = sheet.height();
+
+    // Scale parameters based on output DPI (300 vs 600 DPI)
+    let dpi_factor = (dpi as f64 / 300.0).max(1.0);
+    let scale_brand = (3.0 * dpi_factor).round() as u32;
+    let scale_badge = (2.0 * dpi_factor).round() as u32;
+    let r = (26.0 * dpi_factor).round() as i64;
+
+    let logo_w = (310.0 * dpi_factor).round() as u32;
+    let logo_h = (74.0 * dpi_factor).round() as u32;
+    let pad = (20.0 * dpi_factor).round() as u32;
+
+    if page_w < logo_w + pad * 2 || page_h < logo_h + pad * 2 {
         return;
     }
-    let start_x = page_w - logo_w - 30;
-    let start_y = page_h - logo_h - 25;
+
+    // Helper: test if a rectangle intersects any photo bounding box
+    let check_overlap = |lx: u32, ly: u32, lw: u32, lh: u32| -> bool {
+        let l_right = lx + lw;
+        let l_bottom = ly + lh;
+        for pos in &layout.positions {
+            let p_right = pos.x_offset + pos.width;
+            let p_bottom = pos.y_offset + pos.height;
+            // Overlap check with safety margin
+            if lx < p_right + 8 && l_right + 8 > pos.x_offset && ly < p_bottom + 8 && l_bottom + 8 > pos.y_offset {
+                return true;
+            }
+        }
+        false
+    };
+
+    // Candidate 1: Standard bottom-right margin
+    let c1_x = page_w.saturating_sub(logo_w + pad);
+    let c1_y = page_h.saturating_sub(logo_h + pad);
+
+    // Candidate 2: Right-side whitespace (centered vertically in margin)
+    let c2_x = page_w.saturating_sub(logo_w + (pad / 2));
+    let c2_y = (page_h.saturating_sub(logo_h)) / 2;
+
+    // Candidate 3: Bottom-center whitespace
+    let c3_x = (page_w.saturating_sub(logo_w)) / 2;
+    let c3_y = page_h.saturating_sub(logo_h + pad);
+
+    // Candidate 4: Top-right margin
+    let c4_x = page_w.saturating_sub(logo_w + pad);
+    let c4_y = pad;
+
+    let (start_x, start_y) = if !check_overlap(c1_x, c1_y, logo_w, logo_h) {
+        (c1_x, c1_y)
+    } else if !check_overlap(c2_x, c2_y, logo_w, logo_h) {
+        (c2_x, c2_y)
+    } else if !check_overlap(c3_x, c3_y, logo_w, logo_h) {
+        (c3_x, c3_y)
+    } else if !check_overlap(c4_x, c4_y, logo_w, logo_h) {
+        (c4_x, c4_y)
+    } else {
+        // Fallback: place in safe right margin
+        (c1_x, c1_y)
+    };
 
     // 1. Draw stylized circular emblem (G icon with blue-cyan gradient)
-    let cx = (start_x + 32) as i64;
-    let cy = (start_y + 36) as i64;
-    let r = 26i64;
+    let cx = (start_x as f64 + 32.0 * dpi_factor) as i64;
+    let cy = (start_y as f64 + 36.0 * dpi_factor) as i64;
 
     for dy in -r..=r {
         for dx in -r..=r {
@@ -466,12 +518,14 @@ fn draw_gspaceone_logo(sheet: &mut RgbaImage, page_w: u32, page_h: u32) {
     }
 
     // 2. White 'G' monogram inside emblem
-    for dy in -15..=15 {
-        for dx in -15..=15 {
+    let r_inner = (15.0 * dpi_factor) as i64;
+    let r_hole = (7.0 * dpi_factor) as i64;
+    for dy in -r_inner..=r_inner {
+        for dx in -r_inner..=r_inner {
             let dist_sq = dx * dx + dy * dy;
-            if dist_sq <= 225 && dist_sq >= 64 {
+            if dist_sq <= r_inner * r_inner && dist_sq >= r_hole * r_hole {
                 // Arc of G (open on top-right quadrant)
-                if !(dx > 4 && dy < 0) {
+                if !(dx > (4.0 * dpi_factor) as i64 && dy < 0) {
                     let px = (cx + dx) as u32;
                     let py = (cy + dy) as u32;
                     if px < sheet.width() && py < sheet.height() {
@@ -482,8 +536,10 @@ fn draw_gspaceone_logo(sheet: &mut RgbaImage, page_w: u32, page_h: u32) {
         }
     }
     // G crossbar
-    for dx in 0..=11 {
-        for dy in -4..=3 {
+    let cross_w = (11.0 * dpi_factor) as i64;
+    let cross_h = (4.0 * dpi_factor) as i64;
+    for dx in 0..=cross_w {
+        for dy in -cross_h..=cross_h {
             let px = (cx + dx) as u32;
             let py = (cy + dy) as u32;
             if px < sheet.width() && py < sheet.height() {
@@ -493,8 +549,12 @@ fn draw_gspaceone_logo(sheet: &mut RgbaImage, page_w: u32, page_h: u32) {
     }
 
     // 3. Vertical separator bar
-    for py in (start_y + 12)..(start_y + 60) {
-        for px in (start_x + 72)..(start_x + 74) {
+    let bar_x = (start_x as f64 + 72.0 * dpi_factor) as u32;
+    let bar_y1 = (start_y as f64 + 12.0 * dpi_factor) as u32;
+    let bar_y2 = (start_y as f64 + 60.0 * dpi_factor) as u32;
+    let bar_w = (2.0 * dpi_factor).round() as u32;
+    for py in bar_y1..bar_y2 {
+        for px in bar_x..(bar_x + bar_w) {
             if px < sheet.width() && py < sheet.height() {
                 sheet.put_pixel(px, py, Rgba([203, 213, 225, 255]));
             }
@@ -503,13 +563,15 @@ fn draw_gspaceone_logo(sheet: &mut RgbaImage, page_w: u32, page_h: u32) {
 
     // 4. "GSpaceOne" typography in bold dark slate (#0f172a)
     let brand_text_color = Rgba([15, 23, 42, 255]);
-    draw_bitmap_string(sheet, "GSpaceOne", start_x + 85, start_y + 12, 3, brand_text_color);
+    let text_x = (start_x as f64 + 85.0 * dpi_factor) as u32;
+    let text_y = (start_y as f64 + 12.0 * dpi_factor) as u32;
+    draw_bitmap_string(sheet, "GSpaceOne", text_x, text_y, scale_brand, brand_text_color);
 
     // 5. "PhotoID" rounded blue badge with camera emblem
-    let badge_x = start_x + 85;
-    let badge_y = start_y + 40;
-    let badge_w = 150u32;
-    let badge_h = 24u32;
+    let badge_x = (start_x as f64 + 85.0 * dpi_factor) as u32;
+    let badge_y = (start_y as f64 + 40.0 * dpi_factor) as u32;
+    let badge_w = (150.0 * dpi_factor) as u32;
+    let badge_h = (24.0 * dpi_factor) as u32;
     let badge_color = Rgba([0, 112, 243, 255]); // Signature electric blue
 
     // Pill background
@@ -523,5 +585,7 @@ fn draw_gspaceone_logo(sheet: &mut RgbaImage, page_w: u32, page_h: u32) {
 
     // Badge text: "PhotoID @" where '@' is the camera glyph
     let white = Rgba([255, 255, 255, 255]);
-    draw_bitmap_string(sheet, "PhotoID @", badge_x + 16, badge_y + 5, 2, white);
+    let badge_text_x = (badge_x as f64 + 16.0 * dpi_factor) as u32;
+    let badge_text_y = (badge_y as f64 + 5.0 * dpi_factor) as u32;
+    draw_bitmap_string(sheet, "PhotoID @", badge_text_x, badge_text_y, scale_badge, white);
 }

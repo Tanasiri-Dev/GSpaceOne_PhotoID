@@ -17,12 +17,29 @@ export interface PrintLayoutInfo {
   isLandscape?: boolean;
 }
 
+export interface ImageMetadataInfo {
+  filePath: string;
+  fileName: string;
+  fileSizeFormatted: string;
+  width: number;
+  height: number;
+  megapixels: string;
+  aspectRatio: string;
+  cameraModel?: string;
+  lensModel?: string;
+  iso?: string;
+  shutterSpeed?: string;
+  aperture?: string;
+  dateTime?: string;
+}
+
 export interface AppStore {
   // Image state
   imagePath: string | null;
   previewData: string | null; // base64
   isProcessing: boolean;
   imageDimensions: { width: number; height: number } | null;
+  imageInfo: ImageMetadataInfo | null;
 
   // Adjustment state
   brightness: number; // -100 to 100 (maps to -1.0 to 1.0)
@@ -44,9 +61,15 @@ export interface AppStore {
   // UI state
   settingsWindowOpen: boolean;
   showPrintPreview: boolean;
+  showInfoModal: boolean;
+  mainWorkspaceMode: 'editor' | 'sheet'; // Swap between single photo editor & full print sheet
 
   // Actions
   loadImage: (path: string) => Promise<void>;
+  fetchImageInfo: () => Promise<void>;
+  setShowInfoModal: (show: boolean) => void;
+  setWorkspaceMode: (mode: 'editor' | 'sheet') => void;
+  toggleWorkspaceMode: () => void;
   setPreviewData: (data: string | null) => void;
   setImageDimensions: (width: number, height: number) => void;
   applyAdjustments: () => Promise<void>;
@@ -161,6 +184,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   previewData: null,
   isProcessing: false,
   imageDimensions: null,
+  imageInfo: null,
 
   // Adjustment state
   brightness: 0,
@@ -181,7 +205,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   // UI state
   settingsWindowOpen: false,
-  showPrintPreview: false,
+  showPrintPreview: true, // Default open so user immediately sees both single photo and sheet
+  showInfoModal: false,
+  mainWorkspaceMode: 'editor', // 'editor' for single photo, 'sheet' for full sheet view
 
   // Actions
   loadImage: async (path: string) => {
@@ -202,13 +228,36 @@ export const useAppStore = create<AppStore>((set, get) => ({
           cropHeight: result.height,
         });
       }
+      // Fetch detailed file and EXIF metadata in background
+      get().fetchImageInfo();
     } catch (err) {
       console.warn('Tauri invoke load_image failed or not running in Tauri backend:', err);
-      // Fallback for development/preview testing: create a basic canvas placeholder if needed
     } finally {
       set({ isProcessing: false });
     }
   },
+
+  fetchImageInfo: async () => {
+    const { imagePath } = get();
+    if (!imagePath) return;
+    try {
+      const info = await invoke<ImageMetadataInfo>('get_image_info', { path: imagePath });
+      if (info) {
+        set({ imageInfo: info });
+      }
+    } catch (err) {
+      console.warn('get_image_info invoke error:', err);
+    }
+  },
+
+  setShowInfoModal: (show: boolean) => set({ showInfoModal: show }),
+
+  setWorkspaceMode: (mode: 'editor' | 'sheet') => set({ mainWorkspaceMode: mode }),
+
+  toggleWorkspaceMode: () =>
+    set((state) => ({
+      mainWorkspaceMode: state.mainWorkspaceMode === 'editor' ? 'sheet' : 'editor',
+    })),
 
   setPreviewData: (data: string | null) => set({ previewData: data }),
 

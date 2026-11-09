@@ -26,6 +26,8 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
   const resetCrop = useAppStore((state) => state.resetCrop);
   const setIdSize = useAppStore((state) => state.setIdSize);
   const setPaperSize = useAppStore((state) => state.setPaperSize);
+  const fetchImageInfo = useAppStore((state) => state.fetchImageInfo);
+  const setShowInfoModal = useAppStore((state) => state.setShowInfoModal);
 
   const { openSettingsWindow, closeSettingsWindow, isCurrentWindowSettings } = useFloatingWindow();
   const isDetached = isStandalone || isCurrentWindowSettings();
@@ -187,11 +189,24 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
           </div>
         </section>
 
-        {/* Section 4: Global Reset */}
-        <div style={{ marginTop: 'auto', paddingTop: 'var(--space-md)' }}>
+        {/* Section 4: Image Info / EXIF & Global Reset */}
+        <div style={{ marginTop: 'auto', paddingTop: 'var(--space-md)', display: 'flex', gap: 'var(--space-sm)' }}>
           <button
             type="button"
-            className="btn btn-danger w-full"
+            className="btn btn-secondary"
+            style={{ flex: 1, padding: '8px 10px' }}
+            onClick={() => {
+              fetchImageInfo();
+              setShowInfoModal(true);
+            }}
+            title="Show EXIF Metadata & Image Information"
+          >
+            ℹ️ Info / EXIF
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            style={{ flex: 1, padding: '8px 10px' }}
             onClick={resetAll}
             title="Reset all adjustments, crop, and framing"
           >
