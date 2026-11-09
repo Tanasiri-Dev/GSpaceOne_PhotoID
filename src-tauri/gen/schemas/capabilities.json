@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capabilities for GSpaceOne PhotoID","local":true,"windows":["main","settings"],"permissions":["core:default","dialog:default","fs:default","shell:default"]}}
