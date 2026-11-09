@@ -257,6 +257,8 @@ export const PrintPreview: React.FC = () => {
     cropY,
     cropWidth,
     cropHeight,
+    customPhotoCount,
+    showBrandLogo,
   ]);
 
   const photoCount = printLayoutInfo?.photoCount || 0;
@@ -282,14 +284,24 @@ export const PrintPreview: React.FC = () => {
           </svg>
           Print Layout Preview
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={toggleWorkspaceMode}
-          title="Swap layout preview into large central workspace"
-        >
-          ⇄ Swap
-        </button>
+        <div style={{ display: 'flex', gap: '4px' }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => computeLayout()}
+            title="Refresh layout preview"
+          >
+            🔄 Refresh
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={toggleWorkspaceMode}
+            title="Swap layout preview into large central workspace"
+          >
+            ⇄ Swap
+          </button>
+        </div>
       </div>
 
       <div className="side-panel-body">

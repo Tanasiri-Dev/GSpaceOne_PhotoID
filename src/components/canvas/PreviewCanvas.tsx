@@ -476,6 +476,8 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
     imageToCanvas,
     mainWorkspaceMode,
     printLayoutInfo,
+    customPhotoCount,
+    showBrandLogo,
     imageDimensions,
   ]);
 
@@ -763,7 +765,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
             )}
             {mainWorkspaceMode === 'sheet' && printLayoutInfo && (
               <span className="canvas-status-item">
-                Layout: {printLayoutInfo.photoCount} photos on {selectedPaperSize} ({selectedIdSize})
+                Layout: {customPhotoCount !== null ? Math.min(customPhotoCount, printLayoutInfo.photoCount) : printLayoutInfo.photoCount} of {printLayoutInfo.photoCount} photos on {selectedPaperSize} ({selectedIdSize})
               </span>
             )}
           </div>
