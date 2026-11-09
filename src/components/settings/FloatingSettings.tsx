@@ -18,6 +18,9 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
   const gamma = useAppStore((state) => state.gamma);
   const selectedIdSize = useAppStore((state) => state.selectedIdSize);
   const selectedPaperSize = useAppStore((state) => state.selectedPaperSize);
+  const printLayoutInfo = useAppStore((state) => state.printLayoutInfo);
+  const customPhotoCount = useAppStore((state) => state.customPhotoCount);
+  const setCustomPhotoCount = useAppStore((state) => state.setCustomPhotoCount);
   const isProcessing = useAppStore((state) => state.isProcessing);
 
   const setAdjustment = useAppStore((state) => state.setAdjustment);
@@ -189,6 +192,65 @@ export const FloatingSettings: React.FC<FloatingSettingsProps> = ({
               <option value="Letter">Letter (216 × 279 mm)</option>
             </select>
           </div>
+
+          {/* Photos to Print on Sheet */}
+          {(() => {
+            const maxPhotos = printLayoutInfo?.photoCount || 6;
+            const effectiveCount = customPhotoCount !== null ? Math.min(customPhotoCount, maxPhotos) : maxPhotos;
+            return (
+              <div className="form-group" style={{ marginTop: 'var(--space-sm)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label className="form-label" style={{ margin: 0 }}>
+                    Photos on Sheet
+                  </label>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Max: {maxPhotos} photos
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '2px 8px', minWidth: '24px', height: '28px' }}
+                    disabled={effectiveCount <= 1}
+                    onClick={() => setCustomPhotoCount(Math.max(1, effectiveCount - 1))}
+                  >
+                    -
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={maxPhotos}
+                    className="select-input"
+                    style={{ flex: 1, textAlign: 'center', padding: '4px' }}
+                    value={effectiveCount}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setCustomPhotoCount(isNaN(val) ? null : Math.max(1, Math.min(val, maxPhotos)));
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '2px 8px', minWidth: '24px', height: '28px' }}
+                    disabled={effectiveCount >= maxPhotos}
+                    onClick={() => setCustomPhotoCount(Math.min(maxPhotos, effectiveCount + 1))}
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '2px 8px', fontSize: '11px', height: '28px' }}
+                    onClick={() => setCustomPhotoCount(null)}
+                    title="Fill all available slots on sheet"
+                  >
+                    Max
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           <div
             className="form-group checkbox-group"

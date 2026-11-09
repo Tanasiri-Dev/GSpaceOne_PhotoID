@@ -57,6 +57,8 @@ export interface AppStore {
   selectedIdSize: string;
   selectedPaperSize: string;
   printLayoutInfo: PrintLayoutInfo | null;
+  customPhotoCount: number | null; // User-selected photo count on sheet (capped at printLayoutInfo.photoCount)
+  printDpi: number; // 300 or 600
   showBrandLogo: boolean;
 
   // UI state
@@ -89,6 +91,8 @@ export interface AppStore {
   togglePrintPreview: () => void;
   setIdSize: (size: string) => void;
   setPaperSize: (size: string) => void;
+  setCustomPhotoCount: (count: number | null) => void;
+  setPrintDpi: (dpi: number) => void;
   computeLayout: () => Promise<void>;
   executePrint: () => Promise<void>;
   resetAll: () => void;
@@ -206,6 +210,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   selectedIdSize: '2"',
   selectedPaperSize: '4×6',
   printLayoutInfo: calculatePrintLayout('2"', '4×6'),
+  customPhotoCount: null, // null means use maximum photo count from calculated layout
+  printDpi: 300,
   showBrandLogo: true,
 
   // UI state
@@ -217,6 +223,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   setShowBrandLogo: (show: boolean) => set({ showBrandLogo: show }),
   setShowPrintModal: (show: boolean) => set({ showPrintModal: show }),
+  setCustomPhotoCount: (count: number | null) => set({ customPhotoCount: count }),
+  setPrintDpi: (dpi: number) => set({ printDpi: dpi }),
 
   // Actions
   loadImage: async (path: string) => {
@@ -430,12 +438,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   saveHighQualityImage: async (outputPath: string) => {
-    const { selectedIdSize, selectedPaperSize, showBrandLogo } = get();
+    const { selectedIdSize, selectedPaperSize, showBrandLogo, customPhotoCount, printLayoutInfo } = get();
+    const maxPhotos = printLayoutInfo?.photoCount || 6;
+    const effectiveCount = customPhotoCount !== null ? Math.min(customPhotoCount, maxPhotos) : maxPhotos;
+
     return await invoke<string>('save_high_quality_image', {
       idSize: selectedIdSize,
       paperSize: selectedPaperSize,
       outputPath,
       showLogo: showBrandLogo,
+      photoCount: effectiveCount,
     });
   },
 

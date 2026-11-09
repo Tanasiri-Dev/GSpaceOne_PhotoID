@@ -15,7 +15,10 @@ export const PrintDialogModal: React.FC = () => {
   const previewData = useAppStore((state) => state.previewData);
   const imageDimensions = useAppStore((state) => state.imageDimensions);
   const selectedPaperSize = useAppStore((state) => state.selectedPaperSize);
+  const selectedIdSize = useAppStore((state) => state.selectedIdSize);
   const printLayoutInfo = useAppStore((state) => state.printLayoutInfo);
+  const customPhotoCount = useAppStore((state) => state.customPhotoCount);
+  const setCustomPhotoCount = useAppStore((state) => state.setCustomPhotoCount);
   const currentGamma = useAppStore((state) => state.gamma);
   const brightness = useAppStore((state) => state.brightness);
   const exposure = useAppStore((state) => state.exposure);
@@ -39,10 +42,13 @@ export const PrintDialogModal: React.FC = () => {
   const [colorMode, setColorMode] = useState<string>('Color');
   const [useSystemDialog, setUseSystemDialog] = useState<boolean>(false);
 
-  // Layout Parameters (Matching User Reference Image)
+  // DPI Selection: 300 DPI (Standard) or 600 DPI (Lab Quality)
+  const [dpi, setDpi] = useState<number>(300);
+
+  // Layout Parameters (1.00 = 100% Exact True Physical Size)
   const [pageLayout, setPageLayout] = useState<string>('Single - Scale');
-  const [xScale, setXScale] = useState<number>(2.68);
-  const [yScale, setYScale] = useState<number>(2.68);
+  const [xScale, setXScale] = useState<number>(1.0);
+  const [yScale, setYScale] = useState<number>(1.0);
   const [autoRotate, setAutoRotate] = useState<boolean>(true);
 
   // Margins & Units
@@ -101,6 +107,8 @@ export const PrintDialogModal: React.FC = () => {
     if (showPrintModal) {
       fetchPrinters();
       setPrintGamma(currentGamma > 0 ? currentGamma : 0.8);
+      setXScale(1.0);
+      setYScale(1.0);
       setIsPrinting(false);
       setPrintStatusMsg(null);
     }
@@ -109,8 +117,15 @@ export const PrintDialogModal: React.FC = () => {
   // Compute paper dimensions in inches and millimeters
   const paperW_mm = printLayoutInfo?.paperWidthMm || (selectedPaperSize === '4×6' ? 101.6 : selectedPaperSize === '5×7' ? 127.0 : 210.0);
   const paperH_mm = printLayoutInfo?.paperHeightMm || (selectedPaperSize === '4×6' ? 152.4 : selectedPaperSize === '5×7' ? 177.8 : 297.0);
-  const paperW_in = (paperW_mm / 25.4).toFixed(1);
-  const paperH_in = (paperH_mm / 25.4).toFixed(1);
+  const paperW_in = (paperW_mm / 25.4).toFixed(2);
+  const paperH_in = (paperH_mm / 25.4).toFixed(2);
+
+  const idW_mm = printLayoutInfo?.idWidthMm || 35.0;
+  const idH_mm = printLayoutInfo?.idHeightMm || 45.0;
+
+  // Maximum calculated slots vs User-requested photo count
+  const maxPhotos = printLayoutInfo?.photoCount || 6;
+  const effectivePhotoCount = customPhotoCount !== null ? Math.min(customPhotoCount, maxPhotos) : maxPhotos;
 
   // Helper: Draw adjusted photo with color & custom print gamma
   const drawAdjustedPhoto = useCallback(
@@ -139,7 +154,6 @@ export const PrintDialogModal: React.FC = () => {
         sh = Math.max(1, Math.min(img.naturalHeight - sy, cropHeight * scaleY));
       }
 
-      // Offscreen canvas for color & gamma adjustments
       const offCanvas = document.createElement('canvas');
       offCanvas.width = Math.max(10, Math.round(dw));
       offCanvas.height = Math.max(10, Math.round(dh));
@@ -163,12 +177,10 @@ export const PrintDialogModal: React.FC = () => {
           let g = data[i + 1];
           let b = data[i + 2];
 
-          // Brightness & Exposure
           r = Math.min(255, Math.max(0, r * expFactor + bFactor));
           g = Math.min(255, Math.max(0, g * expFactor + bFactor));
           b = Math.min(255, Math.max(0, b * expFactor + bFactor));
 
-          // Custom Print Gamma
           r = 255 * Math.pow(r / 255, gammaExponent);
           g = 255 * Math.pow(g / 255, gammaExponent);
           b = 255 * Math.pow(b / 255, gammaExponent);
@@ -193,7 +205,7 @@ export const PrintDialogModal: React.FC = () => {
     [imageDimensions, cropActive, cropX, cropY, cropWidth, cropHeight, brightness, exposure, printGamma, colorMode]
   );
 
-  // Render Live Preview Sheet with Dashed Margin Boundary & Photo Grid
+  // Render Live Preview Sheet with Dashed Margin Boundary & Exact Physical Grid
   useEffect(() => {
     if (!showPrintModal) return;
     const canvas = previewCanvasRef.current;
@@ -209,7 +221,7 @@ export const PrintDialogModal: React.FC = () => {
     canvas.width = previewW;
     canvas.height = previewH;
 
-    // Dark grey canvas container surround
+    // Background surround
     ctx.fillStyle = '#64748b';
     ctx.fillRect(0, 0, previewW, previewH);
 
@@ -243,16 +255,13 @@ export const PrintDialogModal: React.FC = () => {
     ctx.strokeRect(printAreaX, printAreaY, printAreaW, printAreaH);
     ctx.setLineDash([]);
 
-    // Grid Layout parameters
+    // Grid Layout parameters (1.00 = True 1:1 physical millimeter scale)
     const columns = printLayoutInfo?.columns || 2;
     const rows = printLayoutInfo?.rows || 3;
-    const idW_mm = printLayoutInfo?.idWidthMm || 35.0;
-    const idH_mm = printLayoutInfo?.idHeightMm || 45.0;
     const spacing_mm = printLayoutInfo?.spacingMm || 3.0;
 
-    // Scale multiplier applied to grid cells
-    const cellW = idW_mm * mmToSheetPx * Math.max(0.2, xScale / 2.68);
-    const cellH = idH_mm * mmToSheetPx * Math.max(0.2, yScale / 2.68);
+    const cellW = idW_mm * mmToSheetPx * Math.max(0.1, xScale);
+    const cellH = idH_mm * mmToSheetPx * Math.max(0.1, yScale);
     const spacing = spacing_mm * mmToSheetPx;
 
     const totalGridW = columns * cellW + (columns - 1) * spacing;
@@ -288,22 +297,25 @@ export const PrintDialogModal: React.FC = () => {
     const drawContent = (img?: HTMLImageElement) => {
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < columns; c++) {
+          const slotIndex = r * columns + c;
           const posX = gridStartX + c * (cellW + spacing);
           const posY = gridStartY + r * (cellH + spacing);
 
-          // Only draw inside sheet area
           if (posX + cellW < sheetX || posX > sheetX + sheetW || posY + cellH < sheetY || posY > sheetY + sheetH) {
             continue;
           }
 
-          if (img && img.naturalWidth > 0) {
+          if (slotIndex < effectivePhotoCount && img && img.naturalWidth > 0) {
             drawAdjustedPhoto(ctx, img, posX, posY, cellW, cellH);
           } else {
-            ctx.fillStyle = '#e2e8f0';
+            // Unfilled slot placeholder
+            ctx.fillStyle = '#f8fafc';
             ctx.fillRect(posX, posY, cellW, cellH);
             ctx.strokeStyle = '#cbd5e1';
-            ctx.lineWidth = 1;
+            ctx.lineWidth = 0.75;
+            ctx.setLineDash([2, 2]);
             ctx.strokeRect(posX, posY, cellW, cellH);
+            ctx.setLineDash([]);
           }
 
           // Cut marks
@@ -353,6 +365,8 @@ export const PrintDialogModal: React.FC = () => {
     previewData,
     paperW_mm,
     paperH_mm,
+    idW_mm,
+    idH_mm,
     marginLeft,
     marginTop,
     marginRight,
@@ -361,20 +375,20 @@ export const PrintDialogModal: React.FC = () => {
     position,
     xScale,
     yScale,
+    effectivePhotoCount,
     printLayoutInfo,
     showBrandLogo,
     drawAdjustedPhoto,
   ]);
 
-  // Execute actual printing using Rust .NET spooler or isolated iframe window.print()
+  // Execute actual printing with True Physical DPI & matching paper bounds
   const handleExecutePrint = async () => {
     if (isPrinting) return;
     setIsPrinting(true);
-    setPrintStatusMsg('Rendering print sheet...');
+    setPrintStatusMsg(`Rendering ${effectivePhotoCount} photos at ${dpi} DPI...`);
 
     try {
       const printCanvas = document.createElement('canvas');
-      const dpi = 300;
       const mmToPx = dpi / 25.4;
       const canvasW = Math.round(paperW_mm * mmToPx);
       const canvasH = Math.round(paperH_mm * mmToPx);
@@ -401,12 +415,11 @@ export const PrintDialogModal: React.FC = () => {
 
       const columns = printLayoutInfo?.columns || 2;
       const rows = printLayoutInfo?.rows || 3;
-      const idW_mm = printLayoutInfo?.idWidthMm || 35.0;
-      const idH_mm = printLayoutInfo?.idHeightMm || 45.0;
       const spacing_mm = printLayoutInfo?.spacingMm || 3.0;
 
-      const cellW = idW_mm * mmToPx * Math.max(0.2, xScale / 2.68);
-      const cellH = idH_mm * mmToPx * Math.max(0.2, yScale / 2.68);
+      // 1:1 Physical dimensions based on DPI
+      const cellW = idW_mm * mmToPx * Math.max(0.1, xScale);
+      const cellH = idH_mm * mmToPx * Math.max(0.1, yScale);
       const spacing = spacing_mm * mmToPx;
 
       const totalGridW = columns * cellW + (columns - 1) * spacing;
@@ -449,27 +462,31 @@ export const PrintDialogModal: React.FC = () => {
 
         for (let r = 0; r < rows; r++) {
           for (let c = 0; c < columns; c++) {
+            const slotIndex = r * columns + c;
             const posX = gridStartX + c * (cellW + spacing);
             const posY = gridStartY + r * (cellH + spacing);
 
-            drawAdjustedPhoto(pCtx, img, posX, posY, cellW, cellH);
+            // Only draw photo if within user-requested photo count
+            if (slotIndex < effectivePhotoCount) {
+              drawAdjustedPhoto(pCtx, img, posX, posY, cellW, cellH);
 
-            // Cut marks
-            const tick = Math.round(18 * (dpi / 300));
-            pCtx.strokeStyle = '#94a3b8';
-            pCtx.lineWidth = 1;
-            pCtx.beginPath();
-            pCtx.moveTo(posX - tick, posY); pCtx.lineTo(posX, posY); pCtx.lineTo(posX, posY - tick);
-            pCtx.stroke();
-            pCtx.beginPath();
-            pCtx.moveTo(posX + cellW + tick, posY); pCtx.lineTo(posX + cellW, posY); pCtx.lineTo(posX + cellW, posY - tick);
-            pCtx.stroke();
-            pCtx.beginPath();
-            pCtx.moveTo(posX - tick, posY + cellH); pCtx.lineTo(posX, posY + cellH); pCtx.lineTo(posX, posY + cellH + tick);
-            pCtx.stroke();
-            pCtx.beginPath();
-            pCtx.moveTo(posX + cellW + tick, posY + cellH); pCtx.lineTo(posX + cellW, posY + cellH); pCtx.lineTo(posX + cellW, posY + cellH + tick);
-            pCtx.stroke();
+              // Precise Cut marks
+              const tick = Math.round(18 * (dpi / 300));
+              pCtx.strokeStyle = '#94a3b8';
+              pCtx.lineWidth = 1;
+              pCtx.beginPath();
+              pCtx.moveTo(posX - tick, posY); pCtx.lineTo(posX, posY); pCtx.lineTo(posX, posY - tick);
+              pCtx.stroke();
+              pCtx.beginPath();
+              pCtx.moveTo(posX + cellW + tick, posY); pCtx.lineTo(posX + cellW, posY); pCtx.lineTo(posX + cellW, posY - tick);
+              pCtx.stroke();
+              pCtx.beginPath();
+              pCtx.moveTo(posX - tick, posY + cellH); pCtx.lineTo(posX, posY + cellH); ctxDrawLine(pCtx, posX, posY + cellH + tick);
+              pCtx.stroke();
+              pCtx.beginPath();
+              pCtx.moveTo(posX + cellW + tick, posY + cellH); pCtx.lineTo(posX + cellW, posY + cellH); ctxDrawLine(pCtx, posX + cellW, posY + cellH + tick);
+              pCtx.stroke();
+            }
           }
         }
       }
@@ -490,6 +507,7 @@ export const PrintDialogModal: React.FC = () => {
       }
 
       const sheetDataUrl = printCanvas.toDataURL('image/png');
+      const isLandscape = paperW_mm > paperH_mm;
 
       if (useSystemDialog) {
         // Trigger browser / WebView print preview dialog
@@ -505,7 +523,6 @@ export const PrintDialogModal: React.FC = () => {
         const frameDoc = printIframe.contentWindow?.document;
         if (!frameDoc) throw new Error('Could not access print frame');
 
-        const isLandscape = paperW_mm > paperH_mm;
         const pageOrientation = isLandscape ? 'landscape' : 'portrait';
 
         frameDoc.open();
@@ -557,14 +574,16 @@ export const PrintDialogModal: React.FC = () => {
           }, 1200);
         }, 500);
       } else {
-        // Direct spooling to selected printer via Tauri Rust command
-        const isLandscape = paperW_mm > paperH_mm;
-        setPrintStatusMsg(`Sending print job to ${selectedPrinter || 'default printer'}...`);
+        // Direct spooling to selected printer via Tauri Rust command with physical paper calibration
+        setPrintStatusMsg(`Sending to ${selectedPrinter || 'default printer'} (${paperW_in}×${paperH_in} in)...`);
 
         const resp = await invoke<string>('print_sheet_direct', {
           printerName: selectedPrinter || undefined,
           copies: copies,
           isLandscape: isLandscape,
+          paperWidthIn: parseFloat(paperW_in),
+          paperHeightIn: parseFloat(paperH_in),
+          dpi: dpi,
           imageBase64: sheetDataUrl,
         });
 
@@ -581,6 +600,10 @@ export const PrintDialogModal: React.FC = () => {
     }
   };
 
+  const ctxDrawLine = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+    ctx.lineTo(x, y);
+  };
+
   if (!showPrintModal) return null;
 
   return (
@@ -588,7 +611,7 @@ export const PrintDialogModal: React.FC = () => {
       <div className="print-modal-window" onClick={(e) => e.stopPropagation()}>
         {/* Title Bar */}
         <div className="print-modal-titlebar">
-          <span className="print-modal-title">Print</span>
+          <span className="print-modal-title">Print Setup & Layout</span>
           <button
             type="button"
             className="print-modal-close"
@@ -619,9 +642,10 @@ export const PrintDialogModal: React.FC = () => {
           <div className="print-modal-left">
             {activeTab === 'Layout' && (
               <div className="tab-pane-layout">
-                {/* Page Layout Box */}
+                {/* Photo Count & Layout Box */}
                 <fieldset className="print-fieldset">
-                  <legend className="print-legend">Page layout</legend>
+                  <legend className="print-legend">Photos on Sheet & Layout</legend>
+
                   <div className="print-form-row">
                     <select
                       className="print-select w-full"
@@ -634,26 +658,74 @@ export const PrintDialogModal: React.FC = () => {
                     </select>
                   </div>
 
-                  <div className="print-scale-grid">
+                  {/* Quantity Stepper */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 500, color: '#374151' }}>
+                      Photos to Print ({effectivePhotoCount} of {maxPhotos}):
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        type="button"
+                        className="btn-page"
+                        disabled={effectivePhotoCount <= 1}
+                        onClick={() => setCustomPhotoCount(Math.max(1, effectivePhotoCount - 1))}
+                        style={{ width: '26px', height: '24px' }}
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={maxPhotos}
+                        className="print-input-num"
+                        style={{ width: '45px', textAlign: 'center' }}
+                        value={effectivePhotoCount}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setCustomPhotoCount(isNaN(val) ? null : Math.max(1, Math.min(val, maxPhotos)));
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn-page"
+                        disabled={effectivePhotoCount >= maxPhotos}
+                        onClick={() => setCustomPhotoCount(Math.min(maxPhotos, effectivePhotoCount + 1))}
+                        style={{ width: '26px', height: '24px' }}
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-page"
+                        onClick={() => setCustomPhotoCount(null)}
+                        title="Fill all slots on sheet"
+                        style={{ height: '24px', fontSize: '10px' }}
+                      >
+                        Max
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="print-scale-grid" style={{ marginTop: '8px' }}>
                     <div className="print-scale-field">
-                      <label>X Scale</label>
+                      <label>X Scale (1.00 = 100%)</label>
                       <input
                         type="number"
                         step="0.01"
-                        min="0.2"
-                        max="5.0"
+                        min="0.5"
+                        max="2.0"
                         className="print-input-num"
                         value={xScale}
                         onChange={(e) => setXScale(parseFloat(e.target.value) || 1.0)}
                       />
                     </div>
                     <div className="print-scale-field">
-                      <label>Y Scale</label>
+                      <label>Y Scale (1.00 = 100%)</label>
                       <input
                         type="number"
                         step="0.01"
-                        min="0.2"
-                        max="5.0"
+                        min="0.5"
+                        max="2.0"
                         className="print-input-num"
                         value={yScale}
                         onChange={(e) => setYScale(parseFloat(e.target.value) || 1.0)}
@@ -726,7 +798,7 @@ export const PrintDialogModal: React.FC = () => {
                     </div>
                   </fieldset>
 
-                  {/* Units, Position & Gamma Right Sub-Column */}
+                  {/* Units, Position, Gamma & Resolution */}
                   <div className="print-subcol">
                     <div className="print-param-group">
                       <label className="print-label">Units</label>
@@ -775,10 +847,10 @@ export const PrintDialogModal: React.FC = () => {
             {activeTab === 'Printer' && (
               <div className="tab-pane-printer">
                 <fieldset className="print-fieldset">
-                  <legend className="print-legend">Printer Setup</legend>
+                  <legend className="print-legend">Destination Printer</legend>
                   <div className="print-param-group mb-sm">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <label className="print-label" style={{ margin: 0 }}>Destination Printer</label>
+                      <label className="print-label" style={{ margin: 0 }}>Printer Device</label>
                       <button
                         type="button"
                         onClick={fetchPrinters}
@@ -812,23 +884,35 @@ export const PrintDialogModal: React.FC = () => {
 
                   <div className="printer-info-grid">
                     <div className="printer-info-row">
-                      <span className="info-key">Status:</span>
-                      <span className="info-val">Ready</span>
+                      <span className="info-key">Paper:</span>
+                      <span className="info-val">{selectedPaperSize} ({paperW_in} × {paperH_in} in, {paperW_mm.toFixed(1)} × {paperH_mm.toFixed(1)} mm)</span>
                     </div>
                     <div className="printer-info-row">
-                      <span className="info-key">Paper:</span>
-                      <span className="info-val">{selectedPaperSize} ({paperW_in} × {paperH_in} in)</span>
+                      <span className="info-key">ID Size:</span>
+                      <span className="info-val">{selectedIdSize} ({idW_mm.toFixed(1)} × {idH_mm.toFixed(1)} mm)</span>
                     </div>
                     <div className="printer-info-row">
                       <span className="info-key">Driver:</span>
-                      <span className="info-val">Windows GDI / Raster Spooler</span>
+                      <span className="info-val">Windows GDI / Raster Spooler (Direct 1:1 Scale)</span>
                     </div>
                   </div>
                 </fieldset>
 
                 <fieldset className="print-fieldset" style={{ marginTop: '10px' }}>
-                  <legend className="print-legend">Print Options</legend>
+                  <legend className="print-legend">Print Quality & Options</legend>
                   <div className="print-grid-2col">
+                    <div className="print-param-group">
+                      <label className="print-label">Print Quality (DPI)</label>
+                      <select
+                        className="print-select"
+                        value={dpi}
+                        onChange={(e) => setDpi(parseInt(e.target.value, 10) || 300)}
+                      >
+                        <option value={300}>300 DPI (Standard High Quality)</option>
+                        <option value={600}>600 DPI (Ultra-Sharp Photo Lab)</option>
+                      </select>
+                    </div>
+
                     <div className="print-param-group">
                       <label className="print-label">Copies</label>
                       <input
@@ -840,6 +924,9 @@ export const PrintDialogModal: React.FC = () => {
                         onChange={(e) => setCopies(Math.max(1, parseInt(e.target.value, 10) || 1))}
                       />
                     </div>
+                  </div>
+
+                  <div className="print-grid-2col" style={{ marginTop: '8px' }}>
                     <div className="print-param-group">
                       <label className="print-label">Color Output</label>
                       <select
@@ -912,15 +999,18 @@ export const PrintDialogModal: React.FC = () => {
               <button type="button" className="btn-page" disabled>
                 ◀
               </button>
-              <span className="page-text">Page 1/1</span>
+              <span className="page-text">Page 1/1 ({effectivePhotoCount} photos)</span>
               <button type="button" className="btn-page" disabled>
                 ▶
               </button>
             </div>
 
-            {/* Page Size Info */}
+            {/* Page Size & Physical Photo Size Info */}
             <div className="preview-page-size">
-              Page size: {paperW_in} × {paperH_in} in, {paperW_mm.toFixed(2)} × {paperH_mm.toFixed(2)} mm
+              Sheet: {paperW_in} × {paperH_in} in ({paperW_mm.toFixed(1)} × {paperH_mm.toFixed(1)} mm)
+            </div>
+            <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 600, marginTop: '2px', textAlign: 'center' }}>
+              True ID Size: {idW_mm.toFixed(1)} × {idH_mm.toFixed(1)} mm @ {dpi} DPI
             </div>
           </div>
         </div>
@@ -934,7 +1024,7 @@ export const PrintDialogModal: React.FC = () => {
               onClick={handleExecutePrint}
               disabled={isPrinting || !previewData}
             >
-              {isPrinting ? 'Printing...' : 'Print'}
+              {isPrinting ? 'Printing...' : `Print ${effectivePhotoCount} Photos`}
             </button>
             {printStatusMsg && (
               <span style={{ fontSize: '12px', color: '#2563eb', fontWeight: 500 }}>

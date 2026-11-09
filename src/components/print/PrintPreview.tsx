@@ -23,6 +23,8 @@ export const PrintPreview: React.FC = () => {
   const mainWorkspaceMode = useAppStore((state) => state.mainWorkspaceMode);
   const toggleWorkspaceMode = useAppStore((state) => state.toggleWorkspaceMode);
   const setWorkspaceMode = useAppStore((state) => state.setWorkspaceMode);
+  const customPhotoCount = useAppStore((state) => state.customPhotoCount);
+  const setCustomPhotoCount = useAppStore((state) => state.setCustomPhotoCount);
 
   // Preload official logo PNG
   useEffect(() => {
@@ -135,12 +137,16 @@ export const PrintPreview: React.FC = () => {
       const startX = marginHorizontalMm * mmToPx;
       const startY = marginVerticalMm * mmToPx;
 
+      const totalSlots = columns * rows;
+      const effectiveCount = customPhotoCount !== null ? Math.min(customPhotoCount, totalSlots) : totalSlots;
+
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < columns; c++) {
+          const slotIndex = r * columns + c;
           const posX = startX + c * (cellW + spacing);
           const posY = startY + r * (cellH + spacing);
 
-          if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          if (slotIndex < effectiveCount && img && img.naturalWidth > 0 && img.naturalHeight > 0) {
             ctx.save();
             ctx.beginPath();
             ctx.rect(posX, posY, cellW, cellH);
@@ -163,15 +169,14 @@ export const PrintPreview: React.FC = () => {
             }
             ctx.restore();
           } else {
-            // Placeholder photo box
-            ctx.fillStyle = '#f1f5f9';
+            // Placeholder empty photo box
+            ctx.fillStyle = '#f8fafc';
             ctx.fillRect(posX, posY, cellW, cellH);
-
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '9px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('Photo', posX + cellW / 2, posY + cellH / 2);
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 0.75;
+            ctx.setLineDash([2, 2]);
+            ctx.strokeRect(posX, posY, cellW, cellH);
+            ctx.setLineDash([]);
           }
 
           // L-shaped corner cut marks at the 4 corners of each photo cell
@@ -289,9 +294,15 @@ export const PrintPreview: React.FC = () => {
 
       <div className="side-panel-body">
         {/* Layout Summary Badge */}
-        <div className="print-info-badge">
-          {photoCount} {photoCount === 1 ? 'photo' : 'photos'} on {selectedPaperSize} paper
-        </div>
+        {(() => {
+          const maxPhotos = photoCount || 6;
+          const effectiveCount = customPhotoCount !== null ? Math.min(customPhotoCount, maxPhotos) : maxPhotos;
+          return (
+            <div className="print-info-badge">
+              {effectiveCount} of {maxPhotos} photos on {selectedPaperSize} paper
+            </div>
+          );
+        })()}
 
         {/* Paper Sheet Preview Container (Click to expand to center workspace) */}
         <div
@@ -355,6 +366,51 @@ export const PrintPreview: React.FC = () => {
 
         {/* Actions Container */}
         <div style={{ marginTop: 'auto', paddingTop: 'var(--space-md)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* Custom Photo Count Stepper */}
+          {(() => {
+            const maxPhotos = photoCount || 6;
+            const effectiveCount = customPhotoCount !== null ? Math.min(customPhotoCount, maxPhotos) : maxPhotos;
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Photos to Print:</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '2px 8px', minWidth: '24px', height: '24px' }}
+                    disabled={effectiveCount <= 1}
+                    onClick={() => setCustomPhotoCount(Math.max(1, effectiveCount - 1))}
+                    title="Decrease photo count"
+                  >
+                    -
+                  </button>
+                  <span style={{ fontSize: '12px', fontWeight: 600, minWidth: '40px', textAlign: 'center' }}>
+                    {effectiveCount} / {maxPhotos}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '2px 8px', minWidth: '24px', height: '24px' }}
+                    disabled={effectiveCount >= maxPhotos}
+                    onClick={() => setCustomPhotoCount(Math.min(maxPhotos, effectiveCount + 1))}
+                    title="Increase photo count"
+                  >
+                    +
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ padding: '2px 6px', fontSize: '10px', height: '24px' }}
+                    onClick={() => setCustomPhotoCount(null)}
+                    title="Fill all slots on sheet"
+                  >
+                    Max
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Brand Logo Toggle */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Brand Logo on Sheet:</span>
@@ -438,7 +494,9 @@ export const PrintPreview: React.FC = () => {
               <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
               <rect width="12" height="8" x="6" y="14" />
             </svg>
-            {isProcessing ? 'Processing Print...' : `Print ${photoCount} Photos`}
+            {isProcessing
+              ? 'Processing Print...'
+              : `Print ${customPhotoCount !== null ? Math.min(customPhotoCount, photoCount || 6) : photoCount || 6} Photos`}
           </button>
         </div>
       </div>

@@ -34,6 +34,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
   const mainWorkspaceMode = useAppStore((state) => state.mainWorkspaceMode);
   const toggleWorkspaceMode = useAppStore((state) => state.toggleWorkspaceMode);
   const showBrandLogo = useAppStore((state) => state.showBrandLogo);
+  const customPhotoCount = useAppStore((state) => state.customPhotoCount);
   const loadImage = useAppStore((state) => state.loadImage);
 
   // Viewport transformation: scale and offset
@@ -296,29 +297,44 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({ onOpenImage }) => 
       const startX = sheetX + marginHorizontalMm * mmToSheetPx;
       const startY = sheetY + marginVerticalMm * mmToSheetPx;
 
+      const totalSlots = columns * rows;
+      const effectiveCount = customPhotoCount !== null ? Math.min(customPhotoCount, totalSlots) : totalSlots;
+
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < columns; c++) {
+          const slotIndex = r * columns + c;
           const posX = startX + c * (cellW + spacing);
           const posY = startY + r * (cellH + spacing);
 
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(posX, posY, cellW, cellH);
-          ctx.clip();
+          if (slotIndex < effectiveCount) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(posX, posY, cellW, cellH);
+            ctx.clip();
 
-          if (cropActive && cropWidth > 0 && cropHeight > 0) {
-            const scaleX = imgW / (imageDimensions?.width || imgW);
-            const scaleY = imgH / (imageDimensions?.height || imgH);
-            const sx = Math.max(0, Math.min(imgW - 1, cropX * scaleX));
-            const sy = Math.max(0, Math.min(imgH - 1, cropY * scaleY));
-            const sw = Math.max(1, Math.min(imgW - sx, cropWidth * scaleX));
-            const sh = Math.max(1, Math.min(imgH - sy, cropHeight * scaleY));
+            if (cropActive && cropWidth > 0 && cropHeight > 0) {
+              const scaleX = imgW / (imageDimensions?.width || imgW);
+              const scaleY = imgH / (imageDimensions?.height || imgH);
+              const sx = Math.max(0, Math.min(imgW - 1, cropX * scaleX));
+              const sy = Math.max(0, Math.min(imgH - 1, cropY * scaleY));
+              const sw = Math.max(1, Math.min(imgW - sx, cropWidth * scaleX));
+              const sh = Math.max(1, Math.min(imgH - sy, cropHeight * scaleY));
 
-            ctx.drawImage(img, sx, sy, sw, sh, posX, posY, cellW, cellH);
+              ctx.drawImage(img, sx, sy, sw, sh, posX, posY, cellW, cellH);
+            } else {
+              ctx.drawImage(img, posX, posY, cellW, cellH);
+            }
+            ctx.restore();
           } else {
-            ctx.drawImage(img, posX, posY, cellW, cellH);
+            // Unfilled slot placeholder
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(posX, posY, cellW, cellH);
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 0.75;
+            ctx.setLineDash([2, 2]);
+            ctx.strokeRect(posX, posY, cellW, cellH);
+            ctx.setLineDash([]);
           }
-          ctx.restore();
 
           // L-shaped corner cut marks at 4 corners
           const tick = Math.max(4, Math.round(6 * (cellW / 120)));

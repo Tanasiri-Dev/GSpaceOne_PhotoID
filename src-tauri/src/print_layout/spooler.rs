@@ -259,6 +259,7 @@ pub fn render_print_sheet(
     layout: &PrintLayout,
     _dpi: u32,
     show_logo: bool,
+    photo_count: Option<u32>,
 ) -> Result<DynamicImage, RenderError> {
     // 1. Prepare base cropped image
     let cropped = if state.crop.active && state.crop.width > 0 && state.crop.height > 0 {
@@ -305,7 +306,11 @@ pub fn render_print_sheet(
     let cut_mark_color = Rgba([148, 163, 184, 255]); // Clean steel slate (#94a3b8)
     let cut_mark_len = (20.0 * (_dpi as f64) / 300.0).round() as u32;
 
-    for pos in &layout.positions {
+    let target_photos = photo_count
+        .unwrap_or(layout.total_photos)
+        .min(layout.total_photos) as usize;
+
+    for pos in layout.positions.iter().take(target_photos) {
         image::imageops::overlay(&mut sheet, &photo_rgba, pos.x_offset as i64, pos.y_offset as i64);
 
         // Draw L-shaped corner crop/cut marks around each photo

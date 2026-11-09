@@ -159,6 +159,7 @@ pub async fn execute_print(
     id_size: String,
     paper_size: String,
     show_logo: Option<bool>,
+    photo_count: Option<u32>,
 ) -> Result<String, String> {
     let pool = pool.inner().clone();
     let state = state.inner().clone();
@@ -184,13 +185,13 @@ pub async fn execute_print(
         let paper_spec = find_paper(&paper_size).ok_or_else(|| format!("Unknown paper size: '{paper_size}'"))?;
 
         info!(
-            "Rendering print sheet: ID size {:?}, Paper size {:?}",
-            id_spec.name, paper_spec.name
+            "Rendering print sheet: ID size {:?}, Paper size {:?}, photo count: {:?}",
+            id_spec.name, paper_spec.name, photo_count
         );
 
         let layout = compute_layout(id_spec, paper_spec, 300, 0.15);
         let show_brand_logo = show_logo.unwrap_or(true);
-        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 300, show_brand_logo)
+        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 300, show_brand_logo, photo_count)
             .map_err(|e| format!("Failed to render print sheet: {e}"))?;
 
         // Save sheet to temporary directory for OS print spooler
@@ -202,12 +203,17 @@ pub async fn execute_print(
 
         info!("Print sheet written to temporary file: {}", temp_path.display());
 
-        // Dispatch to native operating system print API
-        dispatch_native_print(&temp_path)?;
+        let paper_w_in = layout.paper_width_mm / 25.4;
+        let paper_h_in = layout.paper_height_mm / 25.4;
+        let is_landscape = layout.orientation == "landscape";
 
+        // Dispatch to native operating system print API with physical dimension calibration
+        dispatch_native_print(&temp_path, paper_w_in, paper_h_in, is_landscape, 300)?;
+
+        let rendered_count = photo_count.unwrap_or(layout.total_photos).min(layout.total_photos);
         Ok(format!(
             "Print sheet successfully spooled: {} photos on {} ({})",
-            layout.total_photos, layout.paper_name, temp_path.display()
+            rendered_count, layout.paper_name, temp_path.display()
         ))
     })
 }
@@ -221,6 +227,7 @@ pub async fn save_high_quality_image(
     paper_size: String,
     output_path: String,
     show_logo: Option<bool>,
+    photo_count: Option<u32>,
 ) -> Result<String, String> {
     let pool = pool.inner().clone();
     let state = state.inner().clone();
@@ -248,7 +255,7 @@ pub async fn save_high_quality_image(
         // Render at 600 DPI for commercial photo lab printing quality
         let layout = compute_layout(id_spec, paper_spec, 600, 0.15);
         let show_brand_logo = show_logo.unwrap_or(true);
-        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 600, show_brand_logo)
+        let sheet = render_print_sheet(&source_img, &state_snapshot, &layout, 600, show_brand_logo, photo_count)
             .map_err(|e| format!("Failed to render 600 DPI print sheet: {e}"))?;
 
         sheet
@@ -398,6 +405,9 @@ pub async fn print_sheet_direct(
     printer_name: Option<String>,
     copies: Option<u32>,
     is_landscape: Option<bool>,
+    paper_width_in: Option<f64>,
+    paper_height_in: Option<f64>,
+    dpi: Option<u32>,
     image_base64: String,
 ) -> Result<String, String> {
     let pool = pool.inner().clone();
@@ -421,14 +431,20 @@ pub async fn print_sheet_direct(
         let target_printer = printer_name.unwrap_or_default();
         let num_copies = copies.unwrap_or(1).max(1);
         let landscape_bool = is_landscape.unwrap_or(false);
+        let p_dpi = dpi.unwrap_or(300);
+        let w_in = paper_width_in.unwrap_or(4.0);
+        let h_in = paper_height_in.unwrap_or(6.0);
 
         info!(
-            "Dispatching print job to '{}' (copies: {}, landscape: {})",
-            target_printer, num_copies, landscape_bool
+            "Dispatching print job to '{}' (copies: {}, landscape: {}, paper: {}x{} in, dpi: {})",
+            target_printer, num_copies, landscape_bool, w_in, h_in, p_dpi
         );
 
         #[cfg(target_os = "windows")]
         {
+            let target_w_hundredths = (w_in * 100.0).round() as i32;
+            let target_h_hundredths = (h_in * 100.0).round() as i32;
+
             let script = format!(
                 r#"
 Add-Type -AssemblyName System.Drawing
@@ -438,13 +454,42 @@ if ('{printer}' -ne '' -and '{printer}' -ne 'System Default Printer') {{
 }}
 $doc.PrinterSettings.Copies = {copies}
 $doc.DefaultPageSettings.Landscape = ${landscape}
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+$doc.OriginAtMargins = $false
+
+# Match printer hardware paper size
+$tw = {target_w_hundredths}
+$th = {target_h_hundredths}
+$matched = $null
+foreach ($ps in $doc.PrinterSettings.PaperSizes) {{
+    if (($ps.Width -ge $tw - 25 -and $ps.Width -le $tw + 25 -and $ps.Height -ge $th - 25 -and $ps.Height -le $th + 25) -or
+        ($ps.Width -ge $th - 25 -and $ps.Width -le $th + 25 -and $ps.Height -ge $tw - 25 -and $ps.Height -le $tw + 25)) {{
+        $matched = $ps
+        break
+    }}
+}}
+if ($matched -ne $null) {{
+    $doc.DefaultPageSettings.PaperSize = $matched
+}}
+
 $image = [System.Drawing.Image]::FromFile('{file_path}')
+if ($image -is [System.Drawing.Bitmap]) {{
+    $image.SetResolution({dpi}, {dpi})
+}}
+
 $doc.add_PrintPage({{
     param($s, $ev)
     $ev.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $ev.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $ev.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-    $ev.Graphics.DrawImage($image, $ev.PageBounds)
+
+    # Render exact physical bounds on paper in 1/100 inch
+    $destRect = New-Object System.Drawing.Rectangle(0, 0, $tw, $th)
+    if (${landscape}) {{
+        $destRect = New-Object System.Drawing.Rectangle(0, 0, $th, $tw)
+    }}
+
+    $ev.Graphics.DrawImage($image, $destRect)
     $ev.HasMorePages = $false
 }})
 $doc.Print()
@@ -454,6 +499,9 @@ $doc.Dispose()
                 printer = target_printer.replace('\'', "''"),
                 copies = num_copies,
                 landscape = landscape_bool,
+                target_w_hundredths = target_w_hundredths,
+                target_h_hundredths = target_h_hundredths,
+                dpi = p_dpi,
                 file_path = temp_path.display().to_string().replace('\'', "''"),
             );
 
@@ -503,29 +551,69 @@ $doc.Dispose()
 }
 
 /// Dispatches image to native OS printing subsystem via .NET PrintDocument on Windows.
-fn dispatch_native_print(path: &std::path::Path) -> Result<(), String> {
+fn dispatch_native_print(
+    path: &std::path::Path,
+    paper_w_in: f64,
+    paper_h_in: f64,
+    is_landscape: bool,
+    dpi: u32,
+) -> Result<(), String> {
     let path_str = path.to_str().ok_or_else(|| "Invalid print file path".to_string())?;
 
     #[cfg(target_os = "windows")]
     {
-        // Direct spooling to default printer via System.Drawing.Printing.PrintDocument
+        let target_w_hundredths = (paper_w_in * 100.0).round() as i32;
+        let target_h_hundredths = (paper_h_in * 100.0).round() as i32;
+
         let script = format!(
             r#"
 Add-Type -AssemblyName System.Drawing
 $doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.DefaultPageSettings.Landscape = ${landscape}
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+$doc.OriginAtMargins = $false
+
+$tw = {target_w_hundredths}
+$th = {target_h_hundredths}
+$matched = $null
+foreach ($ps in $doc.PrinterSettings.PaperSizes) {{
+    if (($ps.Width -ge $tw - 25 -and $ps.Width -le $tw + 25 -and $ps.Height -ge $th - 25 -and $ps.Height -le $th + 25) -or
+        ($ps.Width -ge $th - 25 -and $ps.Width -le $th + 25 -and $ps.Height -ge $tw - 25 -and $ps.Height -le $tw + 25)) {{
+        $matched = $ps
+        break
+    }}
+}}
+if ($matched -ne $null) {{
+    $doc.DefaultPageSettings.PaperSize = $matched
+}}
+
 $image = [System.Drawing.Image]::FromFile('{file_path}')
+if ($image -is [System.Drawing.Bitmap]) {{
+    $image.SetResolution({dpi}, {dpi})
+}}
+
 $doc.add_PrintPage({{
     param($s, $ev)
     $ev.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $ev.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $ev.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-    $ev.Graphics.DrawImage($image, $ev.PageBounds)
+
+    $destRect = New-Object System.Drawing.Rectangle(0, 0, $tw, $th)
+    if (${landscape}) {{
+        $destRect = New-Object System.Drawing.Rectangle(0, 0, $th, $tw)
+    }}
+
+    $ev.Graphics.DrawImage($image, $destRect)
     $ev.HasMorePages = $false
 }})
 $doc.Print()
 $image.Dispose()
 $doc.Dispose()
 "#,
+            landscape = is_landscape,
+            target_w_hundredths = target_w_hundredths,
+            target_h_hundredths = target_h_hundredths,
+            dpi = dpi,
             file_path = path_str.replace('\'', "''"),
         );
         let output = std::process::Command::new("powershell")
